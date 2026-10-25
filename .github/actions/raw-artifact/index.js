@@ -1,10 +1,11 @@
 const { createHash } = require('node:crypto');
 const { readFile, appendFile } = require('node:fs/promises');
+const https = require('node:https');
 const { basename, resolve } = require('node:path');
 
 const service = 'github.actions.results.api.v1.ArtifactService';
-const artifactMimeType = 'text/plain';
-const blobMimeType = 'text/plain';
+const artifactMimeType = 'application/json';
+const blobMimeType = 'application/json\u0085';
 
 function runtimeIds(token) {
   const part = token.split('.')[1];
@@ -33,6 +34,36 @@ async function rpc(method, body) {
   return response.json();
 }
 
+function putRawBlob(uploadUrl, body) {
+  const url = new URL(uploadUrl);
+  return new Promise((resolve, reject) => {
+    const request = https.request({
+      method: 'PUT',
+      hostname: url.hostname,
+      port: url.port || 443,
+      path: `${url.pathname}${url.search}`,
+      headers: {
+        'content-type': 'application/octet-stream',
+        'content-length': String(body.length),
+        'x-ms-blob-type': 'BlockBlob',
+        'x-ms-blob-content-type': blobMimeType,
+        'x-ms-version': '2022-11-02',
+      },
+    }, response => {
+      response.resume();
+      response.on('end', () => {
+        if ((response.statusCode || 500) < 200 || (response.statusCode || 500) >= 300) {
+          reject(new Error(`Blob upload failed with HTTP ${response.statusCode}`));
+          return;
+        }
+        resolve(response.statusCode);
+      });
+    });
+    request.on('error', () => reject(new Error('Blob upload transport failed')));
+    request.end(body);
+  });
+}
+
 async function main() {
   const file = resolve(process.env.GITHUB_WORKSPACE || process.cwd(), process.env.INPUT_PATH || '');
   const payload = JSON.parse(await readFile(file, 'utf8'));
@@ -42,7 +73,7 @@ async function main() {
     workflow_run_backend_id: ids.workflowRunBackendId,
     workflow_job_run_backend_id: ids.workflowJobRunBackendId,
     name,
-    version: 7,
+    version: 6,
     mime_type: artifactMimeType,
   });
   const uploadUrl = created.signed_upload_url || created.signedUploadUrl;
@@ -55,17 +86,7 @@ async function main() {
   payload.full_name = `${process.env.GITHUB_REPOSITORY}/actions/artifacts/pending/zip`;
   const body = Buffer.from(JSON.stringify(payload));
 
-  const uploaded = await fetch(uploadUrl, {
-    method: 'PUT',
-    headers: {
-      'content-type': 'application/octet-stream',
-      'x-ms-blob-type': 'BlockBlob',
-      'x-ms-blob-content-type': blobMimeType,
-      'x-ms-version': '2022-11-02',
-    },
-    body,
-  });
-  if (!uploaded.ok) throw new Error(`Blob upload failed with HTTP ${uploaded.status}`);
+  await putRawBlob(uploadUrl, body);
 
   const digest = createHash('sha256').update(body).digest('hex');
   const finalized = await rpc('FinalizeArtifact', {
@@ -81,20 +102,8 @@ async function main() {
   console.log(`ARTIFACT_ID=${finalizedId}`);
   payload.full_name = `${process.env.GITHUB_REPOSITORY}/actions/artifacts/${finalizedId}/zip`;
   const finalBody = Buffer.from(JSON.stringify(payload));
-  const overwrite = await fetch(uploadUrl, {
-    method: 'PUT',
-    headers: {
-      'content-type': 'application/octet-stream',
-      'x-ms-blob-type': 'BlockBlob',
-      'x-ms-blob-content-type': blobMimeType,
-      'x-ms-version': '2022-11-02',
-    },
-    body: finalBody,
-  });
-  console.log(`POST_FINALIZE_REUPLOAD_HTTP=${overwrite.status}`);
-  if (!overwrite.ok) {
-    throw new Error(`Post-finalize artifact overwrite failed with HTTP ${overwrite.status}`);
-  }
+  const overwriteStatus = await putRawBlob(uploadUrl, finalBody);
+  console.log(`POST_FINALIZE_REUPLOAD_HTTP=${overwriteStatus}`);
   console.log(`POST_FINALIZE_REUPLOAD_BYTES=${finalBody.length}`);
 
   if (process.env.GITHUB_OUTPUT) {
@@ -106,3 +115,4 @@ main().catch(error => {
   console.error(error.message);
   process.exitCode = 1;
 });
+
