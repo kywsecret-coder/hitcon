@@ -4,7 +4,7 @@ import { internalArtifactTwirpClient } from '../../../node_modules/@actions/arti
 import { getBackendIdsFromToken } from '../../../node_modules/@actions/artifact/lib/internal/shared/util.js';
 import { StringValue } from '../../../node_modules/@actions/artifact/lib/generated/index.js';
 
-const weird = 'application/json\u0085';
+const weird = 'application/json\u001c';
 
 function payload(repository, artifactId) {
   return Buffer.from(JSON.stringify({
