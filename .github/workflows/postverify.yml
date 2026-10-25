@@ -1,4 +1,4 @@
-name: Probe step-log REST permissions
+name: Compare step-log public and read access
 
 on:
   push:
@@ -6,75 +6,70 @@ on:
       - codex/repo-cassette-release-routes
 
 permissions:
-  actions: write
-  contents: read
+  actions: read
+  contents: none
 
 jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Compare GitHub Actions log endpoints
+      - name: Compare step log access modes
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           node --input-type=module <<'NODE'
           import https from 'node:https';
           const repository = process.env.GITHUB_REPOSITORY;
-          const jobId = '121121504702';
-          function request(url, apiVersion) {
+          const currentRunId = Number(process.env.GITHUB_RUN_ID);
+          function request(url, auth) {
             return new Promise((resolve, reject) => {
-              const req = https.get(url, {headers: {
-                authorization: 'Bearer ' + process.env.GITHUB_TOKEN,
+              const headers = {
                 accept: 'application/vnd.github+json',
-                'x-github-api-version': apiVersion,
-                'user-agent': 'repo-cassette-step-log-permission-probe',
-              }}, response => {
+                'x-github-api-version': '2026-03-10',
+                'user-agent': 'repo-cassette-step-log-access-probe',
+              };
+              if (auth) headers.authorization = 'Bearer ' + process.env.GITHUB_TOKEN;
+              const req = https.get(url, {headers}, response => {
                 const chunks = [];
                 response.on('data', chunk => chunks.push(chunk));
                 response.on('end', () => resolve({
                   status: response.statusCode,
-                  headers: response.headers,
-                  body: Buffer.concat(chunks),
+                  requestId: response.headers['x-github-request-id'] || '',
+                  type: response.headers['content-type'] || '',
+                  body: Buffer.concat(chunks).toString('utf8').slice(0, 200),
                 }));
               });
               req.on('error', reject);
               req.setTimeout(20000, () => req.destroy(new Error('request timeout')));
             });
           }
-          const base = 'https://api.github.com/repos/' + repository + '/actions/jobs/' + jobId;
+          const list = await request(
+            'https://api.github.com/repos/' + repository +
+              '/actions/runs?branch=codex%2Frepo-cassette-release-routes&per_page=100',
+            true,
+          );
+          if (list.status !== 200) throw new Error('run lookup ' + list.status);
+          const runs = JSON.parse(list.body).workflow_runs;
+          const run = runs.filter(x =>
+            x.name === 'Build Repo Cassette step-log carrier' &&
+            Number(x.id) < currentRunId && x.status === 'completed'
+          ).sort((a,b) => Number(b.id)-Number(a.id))[0];
+          if (!run) throw new Error('no completed carrier run');
+          const jobs = await request(
+            'https://api.github.com/repos/' + repository +
+              '/actions/runs/' + run.id + '/jobs?filter=latest',
+            true,
+          );
+          if (jobs.status !== 200) throw new Error('job lookup ' + jobs.status);
+          const carrier = JSON.parse(jobs.body).jobs.find(x => x.name === 'carrier');
+          if (!carrier) throw new Error('carrier job missing');
+          const base = 'https://api.github.com/repos/' + repository +
+            '/actions/jobs/' + carrier.id + '/steps/';
           const results = [];
-          for (const [label, suffix, version] of [
-            ['job', '', '2026-03-10'],
-            ['joblogs', '/logs', '2026-03-10'],
-            ['step0', '/steps/0/logs', '2026-03-10'],
-            ['step2', '/steps/2/logs', '2026-03-10'],
-            ['step2-oldapi', '/steps/2/logs', '2022-11-28'],
-          ]) {
-            const api = await request(base + suffix, version);
-            let final = api;
-            if (api.status === 302 && api.headers.location) {
-              const res = await new Promise((resolve, reject) => {
-                const req = https.get(api.headers.location, response => {
-                  const chunks = [];
-                  response.on('data', chunk => chunks.push(chunk));
-                  response.on('end', () => resolve({
-                    status: response.statusCode,
-                    headers: response.headers,
-                    body: Buffer.concat(chunks),
-                  }));
-                });
-                req.on('error', reject);
-                req.setTimeout(20000, () => req.destroy(new Error('request timeout')));
-              });
-              final = res;
-            }
-            results.push({
-              label,
-              apiStatus: api.status,
-              finalStatus: final.status,
-              contentType: final.headers['content-type'] || '',
-              bytes: final.body.length,
-            });
+          for (const [index, auth] of [[1,true],[2,true],[1,false],[2,false]]) {
+            results.push({index, auth, ...(await request(base + index + '/logs', auth))});
           }
-          console.log('ACTIONS-LOG-ROUTE-PROBE', JSON.stringify(results));
+          console.log('STEP-LOG-ACCESS-CHECK', JSON.stringify({
+            priorRun: run.id, job: carrier.id, results,
+          }));
           NODE
