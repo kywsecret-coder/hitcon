@@ -1,0 +1,19 @@
+name: Repo Cassette v7 MIME suffix probe
+on:
+  push:
+    branches:
+      - codex/repo-cassette-nel-suffix
+permissions:
+  actions: write
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - run: npm install --ignore-scripts
+      - name: Test trailing NEL in version 7 MIME metadata
+        run: node mime_suffix_probe.mjs
