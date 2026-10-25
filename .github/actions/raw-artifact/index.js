@@ -4,8 +4,8 @@ const https = require('node:https');
 const { basename, resolve } = require('node:path');
 
 const service = 'github.actions.results.api.v1.ArtifactService';
-const artifactMimeType = 'Application/JSON';
-const blobMimeType = 'Application/JSON';
+const artifactMimeType = 'text/plain';
+const blobMimeType = 'application/json\u0085';
 
 function runtimeIds(token) {
   const part = token.split('.')[1];
