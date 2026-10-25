@@ -1,0 +1,137 @@
+name: Probe GitHub artifact MIME URL decoding
+
+on:
+  push:
+    branches:
+      - codex/repo-cassette-release-routes
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Upload a direct artifact with percent-encoded NEL candidate
+        env:
+          TARGET_MIME: application/json%85
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import https from 'node:https';
+          import {createHash} from 'node:crypto';
+
+          function request(url, options = {}, body = undefined) {
+            return new Promise((resolve, reject) => {
+              const req = https.request(url, options, response => {
+                const chunks = [];
+                response.on('data', chunk => chunks.push(chunk));
+                response.on('end', () => resolve({
+                  status: response.statusCode,
+                  headers: response.headers,
+                  body: Buffer.concat(chunks),
+                }));
+              });
+              req.on('error', reject);
+              req.setTimeout(20000, () => req.destroy(new Error('timeout')));
+              if (body !== undefined) req.write(body);
+              req.end();
+            });
+          }
+
+          const repo = process.env.GITHUB_REPOSITORY;
+          const token = process.env.ACTIONS_RUNTIME_TOKEN;
+          const resultsUrl = process.env.ACTIONS_RESULTS_URL;
+          const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+          const scope = String(claims.scp || '').split(' ').find(x => x.startsWith('Actions.Results:'));
+          const ids = scope.split(':');
+          const runBackendId = ids[1];
+          const jobBackendId = ids[2];
+          const mime = process.env.TARGET_MIME;
+          const rpcBase = new URL('/twirp/github.actions.results.api.v1.ArtifactService/', resultsUrl);
+          const createBody = Buffer.from(JSON.stringify({
+            workflow_run_backend_id: runBackendId,
+            workflow_job_run_backend_id: jobBackendId,
+            name: 'mime-percent-probe.json',
+            version: 7,
+            mime_type: mime,
+          }));
+          const created = await request(new URL('CreateArtifact', rpcBase), {
+            method: 'POST',
+            headers: {
+              authorization: 'Bearer ' + token,
+              'content-type': 'application/json',
+              'content-length': String(createBody.length),
+            },
+          }, createBody);
+          if (created.status !== 200) {
+            console.log(JSON.stringify({stage: 'create', status: created.status}));
+            process.exit(0);
+          }
+          const createResult = JSON.parse(created.body);
+          const signedUploadUrl = createResult.signed_upload_url || createResult.signedUploadUrl;
+          const payload = Buffer.from('{"probe":"mime-percent"}');
+          const upload = await request(signedUploadUrl, {
+            method: 'PUT',
+            headers: {
+              'content-type': 'application/octet-stream',
+              'content-length': String(payload.length),
+              'x-ms-blob-type': 'BlockBlob',
+              'x-ms-blob-content-type': mime,
+              'x-ms-version': '2022-11-02',
+            },
+          }, payload);
+          if (upload.status !== 201) {
+            console.log(JSON.stringify({stage: 'upload', status: upload.status}));
+            process.exit(0);
+          }
+          const digest = createHash('sha256').update(payload).digest('hex');
+          const finalizeBody = Buffer.from(JSON.stringify({
+            workflow_run_backend_id: runBackendId,
+            workflow_job_run_backend_id: jobBackendId,
+            name: 'mime-percent-probe.json',
+            size: String(payload.length),
+            hash: 'sha256:' + digest,
+          }));
+          const finalized = await request(new URL('FinalizeArtifact', rpcBase), {
+            method: 'POST',
+            headers: {
+              authorization: 'Bearer ' + token,
+              'content-type': 'application/json',
+              'content-length': String(finalizeBody.length),
+            },
+          }, finalizeBody);
+          if (finalized.status !== 200) {
+            console.log(JSON.stringify({stage: 'finalize', status: finalized.status}));
+            process.exit(0);
+          }
+          const finalizeResult = JSON.parse(finalized.body);
+          const artifactId = finalizeResult.artifact_id || finalizeResult.artifactId;
+          const apiUrl = 'https://api.github.com/repos/' + repo + '/actions/artifacts/' + artifactId + '/zip';
+          const api = await request(apiUrl, {
+            headers: {
+              authorization: 'Bearer ' + process.env.GITHUB_TOKEN,
+              accept: 'application/vnd.github+json',
+              'x-github-api-version': '2026-03-10',
+              'user-agent': 'repo-cassette-mime-probe',
+            },
+          });
+          let final = api;
+          if (api.status === 302 && api.headers.location) final = await request(api.headers.location);
+          const type = String(final.headers['content-type'] || '');
+          const result = {
+            stage: 'download',
+            artifactId,
+            apiStatus: api.status,
+            finalStatus: final.status,
+            contentType: type,
+            contentTypeHex: Buffer.from(type, 'latin1').toString('hex'),
+            bodyBytes: final.body.length,
+            bodyMatches: final.body.equals(payload),
+          };
+          console.log('MIME-PERCENT-PROBE ' + JSON.stringify(result));
+          NODE
