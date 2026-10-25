@@ -1,4 +1,4 @@
-name: Repo Cassette raw artifact NEL MIME probe
+name: Repo Cassette duplicate MIME alias probe
 
 on:
   push:
@@ -21,14 +21,15 @@ jobs:
           payload = {
               "full_name": "pending/pending",
               "owner": {"login": "cassette", "avatar_url": "file:///proc/self/environ"},
-              "description": "Repo Cassette raw artifact NEL MIME probe",
+              "description": "Repo Cassette duplicate MIME alias probe",
               "stargazers_count": 0,
           }
           with open("carrier.json", "wb") as stream:
               stream.write(json.dumps(payload, separators=(",", ":")).encode())
           PY
-      - name: Create unarchived JSON artifact with NEL MIME
+      - name: Create raw artifact with duplicate MIME field aliases
         uses: ./.github/actions/raw-artifact
         with:
           path: carrier.json
           mime_type: "application/json\u0085"
+          mime_type_alias: "application/json"
