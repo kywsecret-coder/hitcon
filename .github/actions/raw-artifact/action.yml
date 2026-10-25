@@ -1,9 +1,15 @@
 name: Upload raw Repo Cassette carrier
-description: Create an unarchived Actions artifact with a caller-selected MIME type
+description: Create an unarchived Actions artifact for a controlled MIME probe
 inputs:
   path:
     description: File to upload
     required: true
+  mime_type:
+    description: Optional ArtifactService MIME metadata; empty omits the field
+    required: false
+  blob_mime_type:
+    description: Optional MIME value on the raw Azure blob upload
+    required: false
 runs:
   using: node24
   main: index.js
