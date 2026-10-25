@@ -1,12 +1,59 @@
-name: Repo Cassette carrier
+name: Repo Cassette Python-only whitespace MIME probes
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - codex/repo-cassette-carrier
 
-permissions: {}
+permissions:
+  actions: read
+  contents: read
 
 jobs:
-  disabled:
+  mime-probes:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Carrier workflow disabled after release response probe."
+      - uses: actions/checkout@v4
+      - name: Prepare distinct raw responses
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          for code in ('1c', '1d', '1e', '1f'):
+              payload = {
+                  'full_name': 'pending/pending',
+                  'owner': {'login': 'cassette', 'avatar_url': 'file:///proc/self/environ'},
+                  'description': 'Repo Cassette MIME whitespace probe',
+                  'stargazers_count': 0,
+              }
+              with open(f'carrier-{code}.json', 'wb') as stream:
+                  stream.write(json.dumps(payload, separators=(',', ':')).encode())
+          PY
+      - name: Probe U+001C
+        id: u001c
+        continue-on-error: true
+        uses: ./.github/actions/raw-artifact
+        with:
+          path: carrier-1c.json
+          mime_type: "application/json\\u001c"
+      - name: Probe U+001D
+        id: u001d
+        continue-on-error: true
+        uses: ./.github/actions/raw-artifact
+        with:
+          path: carrier-1d.json
+          mime_type: "application/json\\u001d"
+      - name: Probe U+001E
+        id: u001e
+        continue-on-error: true
+        uses: ./.github/actions/raw-artifact
+        with:
+          path: carrier-1e.json
+          mime_type: "application/json\\u001e"
+      - name: Probe U+001F
+        id: u001f
+        continue-on-error: true
+        uses: ./.github/actions/raw-artifact
+        with:
+          path: carrier-1f.json
+          mime_type: "application/json\\u001f"
