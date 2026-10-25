@@ -22,7 +22,7 @@ jobs:
           const repository = process.env.GITHUB_REPOSITORY;
           const targetRunId = '40177579381';
           const targetJobId = '121121504702';
-          const targetStepIndex = 2;
+          const targetStepIndex = 3;
           const sampleRepository = repository + '/actions/jobs/' + targetJobId + '/steps/' + targetStepIndex + '/logs';
           const expected = Buffer.from(JSON.stringify({
             full_name: sampleRepository,
