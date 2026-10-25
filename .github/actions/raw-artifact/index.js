@@ -17,6 +17,23 @@ function runtimeIds(token) {
   return { workflowRunBackendId: fields[1], workflowJobRunBackendId: fields[2] };
 }
 
+async function rpcRaw(method, rawBody) {
+  const resultsUrl = process.env.ACTIONS_RESULTS_URL;
+  const token = process.env.ACTIONS_RUNTIME_TOKEN;
+  if (!resultsUrl || !token) throw new Error('Actions artifact runtime is unavailable');
+  const url = new URL(`/twirp/${service}/${method}`, new URL(resultsUrl).origin);
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: rawBody,
+  });
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 1000);
+    throw new Error(`${method} failed with HTTP ${response.status}: ${detail}`);
+  }
+  return response.json();
+}
+
 async function rpc(method, body) {
   const resultsUrl = process.env.ACTIONS_RESULTS_URL;
   const token = process.env.ACTIONS_RUNTIME_TOKEN;
@@ -75,8 +92,15 @@ async function main() {
     name,
     version: 7,
   };
-  if (artifactMimeType) createBody.mime_type = artifactMimeType;
-  const created = await rpc('CreateArtifact', createBody);
+  let created;
+  if (process.env.INPUT_MIME_TYPE_ALIAS && artifactMimeType) {
+    const rawBody = JSON.stringify(createBody).slice(0, -1) +
+      `,"mime_type":${JSON.stringify(artifactMimeType)},"mimeType":${JSON.stringify(process.env.INPUT_MIME_TYPE_ALIAS)}}`;
+    created = await rpcRaw('CreateArtifact', rawBody);
+  } else {
+    if (artifactMimeType) createBody.mime_type = artifactMimeType;
+    created = await rpc('CreateArtifact', createBody);
+  }
   const uploadUrl = created.signed_upload_url || created.signedUploadUrl;
   if (!created.ok || !uploadUrl) throw new Error('CreateArtifact returned no upload URL');
 
