@@ -46,17 +46,21 @@ jobs:
         run: |
           node --input-type=module <<'JS'
           import { createHash } from 'node:crypto';
-          const url = 'https://api.github.com/repos/' + process.env.GITHUB_REPOSITORY +
-            '/actions/artifacts/' + process.env.ARTIFACT_ID + '/zip';
-          const queries = [
-            ['default', ''],
-            ['raw', '?raw=1'],
-            ['download', '?download=1'],
-            ['response-content-type', '?response-content-type=application%2Fjson%C2%85'],
-            ['rsct', '?rsct=application%2Fjson%C2%85'],
+          const root = 'https://api.github.com/repos/' + process.env.GITHUB_REPOSITORY;
+          const artifact = root + '/actions/artifacts/' + process.env.ARTIFACT_ID;
+          const routes = [
+            ['zip', artifact + '/zip'],
+            ['zip_download', artifact + '/zip/download'],
+            ['download', artifact + '/download'],
+            ['raw', artifact + '/raw'],
+            ['metadata', artifact],
+            ['run_artifact', root + '/actions/runs/' + process.env.GITHUB_RUN_ID +
+              '/artifacts/' + process.env.ARTIFACT_ID],
+            ['run_artifact_zip', root + '/actions/runs/' + process.env.GITHUB_RUN_ID +
+              '/artifacts/' + process.env.ARTIFACT_ID + '/zip'],
           ];
-          for (const [label, query] of queries) {
-            const response = await fetch(url + query, {
+          for (const [label, url] of routes) {
+            const response = await fetch(url, {
               headers: {
                 accept: 'application/vnd.github.v3+json',
                 authorization: 'Bearer ' + process.env.GH_TOKEN,
