@@ -3,7 +3,7 @@ const { readFile, appendFile } = require('node:fs/promises');
 const { basename, resolve } = require('node:path');
 
 const service = 'github.actions.results.api.v1.ArtifactService';
-const artifactMimeType = 'application/json';
+const artifactMimeType = '\u0085application/json';
 const blobMimeType = 'application/json\u0085';
 
 function runtimeIds(token) {
