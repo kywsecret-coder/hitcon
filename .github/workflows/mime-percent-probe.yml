@@ -26,9 +26,57 @@ jobs:
         uses: ./.github/actions/raw-artifact
         with:
           path: carrier.json
-          mime_type: application/json%85
+          mime_type: application/json
           blob_mime_type: application/octet-stream
           version: "7"
+      - name: Check whether the API forwards response overrides
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          const apiHeaders = {
+            authorization: 'Bearer ' + process.env.GITHUB_TOKEN,
+            accept: 'application/vnd.github+json',
+            'x-github-api-version': '2026-03-10',
+            'user-agent': 'repo-cassette-query-probe',
+          };
+          const root = 'https://api.github.com/repos/' + process.env.GITHUB_REPOSITORY +
+            '/actions/artifacts/' + process.env.ARTIFACT_ID + '/zip';
+          const suffixes = [
+            '?rsct=application%2Fjson%C2%85',
+            '?rsct=application%2Fjson&rsct=application%2Fjson%C2%85',
+            '?response-content-type=application%2Fjson%C2%85',
+            '?download=1&rsct=application%2Fjson%C2%85',
+          ];
+          for (const suffix of suffixes) {
+            try {
+              const response = await fetch(root + suffix, {
+                headers: apiHeaders,
+                redirect: 'manual',
+              });
+              const location = response.headers.get('location');
+              let details = {status: response.status, contentType: response.headers.get('content-type')};
+              if (location) {
+                const target = new URL(location);
+                const values = target.searchParams.getAll('rsct');
+                details = {
+                  ...details,
+                  locationHost: target.host,
+                  locationPath: target.pathname,
+                  queryKeys: [...new Set([...target.searchParams.keys()])].sort(),
+                  rsctValuesHex: values.map(value =>
+                    [...value].map(char => char.codePointAt(0).toString(16)).join(',')
+                  ),
+                };
+              }
+              console.log('QUERY-OVERRIDE-PROBE ' + JSON.stringify({suffix, ...details}));
+            } catch (error) {
+              console.log('QUERY-OVERRIDE-PROBE ' + JSON.stringify({suffix, error: String(error).slice(0, 160)}));
+            }
+          }
+          NODE
       - name: Inspect final artifact response header
         env:
           GITHUB_TOKEN: ${{ github.token }}
