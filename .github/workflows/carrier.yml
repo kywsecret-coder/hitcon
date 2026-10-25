@@ -36,8 +36,8 @@ jobs:
           REST_JOB_ID: ${{ needs.carrier.outputs.job_id }}
           STEP_NUMBER: ${{ needs.carrier.outputs.step_number }}
         run: |
-          node <<'NODE'
-          const https = require('node:https');
+          node --input-type=module <<'NODE'
+          import https from 'node:https';
           const repository = process.env.GITHUB_REPOSITORY;
           const restJobId = process.env.REST_JOB_ID;
           const stepNumber = process.env.STEP_NUMBER;
@@ -78,7 +78,7 @@ jobs:
             apiStatus: api.status,
             finalStatus: final.status,
             contentTypeHex: Buffer.from(contentType, 'latin1').toString('hex'),
-            expectedContentTypeHex: Buffer.from('application/json\\u0085', 'latin1').toString('hex'),
+            expectedContentTypeHex: Buffer.from('application/json' + String.fromCharCode(0x85), 'latin1').toString('hex'),
             bodyBytes: final.body.length,
             bodyMatch: final.body.equals(expected),
             bodyPreview: final.body.toString('utf8').slice(0, 300),
