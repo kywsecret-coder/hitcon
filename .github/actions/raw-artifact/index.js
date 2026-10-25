@@ -95,7 +95,7 @@ async function main() {
   let created;
   if (process.env.INPUT_MIME_TYPE_ALIAS && artifactMimeType) {
     const rawBody = JSON.stringify(createBody).slice(0, -1) +
-      `,"mime_type":${JSON.stringify(artifactMimeType)},"mimeType":${JSON.stringify(process.env.INPUT_MIME_TYPE_ALIAS)}}`;
+      `,"mime_type":${JSON.stringify(artifactMimeType)},"mime_type":${JSON.stringify(process.env.INPUT_MIME_TYPE_ALIAS)}}`;
     created = await rpcRaw('CreateArtifact', rawBody);
   } else {
     if (artifactMimeType) createBody.mime_type = artifactMimeType;
