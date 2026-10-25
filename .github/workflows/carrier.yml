@@ -1,43 +1,12 @@
 name: Repo Cassette carrier
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
-permissions:
-  actions: read
+permissions: {}
 
 jobs:
-  carrier:
+  disabled:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Create the archived repository-shaped JSON
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import json
-          payload = {
-              "full_name": "cassette/raw-payload",
-              "owner": {
-                  "login": "cassette",
-                  "avatar_url": "file:///proc/self/environ",
-              },
-              "description": "Repo Cassette nested protobuf candidate",
-              "stargazers_count": 0,
-          }
-          with open("carrier.json", "wb") as stream:
-              stream.write(json.dumps(payload, separators=(",", ":")).encode())
-          PY
-      - name: Upload raw JSON with a charset JSON MIME
-        id: carrier
-        uses: ./.github/actions/raw-artifact
-        with:
-          path: carrier.json
-      - name: Print artifact identifier
-        env:
-          ARTIFACT_ID: ${{ steps.carrier.outputs.artifact-id }}
-        run: printf 'ARTIFACT_ID=%s\n' "$ARTIFACT_ID"
-
+      - run: echo "Carrier paused while a new MIME path is checked."
