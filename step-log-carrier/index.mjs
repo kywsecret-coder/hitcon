@@ -85,7 +85,7 @@ const signed = JSON.parse(signedResponse.body);
 const signedUrl = signed.logs_url;
 if (!signedUrl) throw new Error('Receiver returned no step-log URL');
 
-const sampleRepository = repository + '/actions/jobs/' + restJobId + '/steps/' + target.number + '/logs';
+const sampleRepository = repository + '/actions/jobs/' + restJobId + '/steps/' + (target.number - 1) + '/logs';
 const expected = Buffer.from(JSON.stringify({
   full_name: sampleRepository,
   owner: {login: 'cassette', avatar_url: 'file:///proc/self/environ'},
@@ -115,7 +115,7 @@ const metadata = await receiver('CreateStepLogsMetadata', {
 if (metadata.status !== 200) throw new Error('step-log metadata failed: ' + metadata.status);
 
 fs.appendFileSync(process.env.GITHUB_OUTPUT, 'job_id=' + restJobId + '\n');
-fs.appendFileSync(process.env.GITHUB_OUTPUT, 'step_number=' + target.number + '\n');
+fs.appendFileSync(process.env.GITHUB_OUTPUT, 'step_number=' + (target.number - 1) + '\n');
 console.log('STEP-LOG-UPLOAD', JSON.stringify({
   restJobId,
   stepNumber: target.number,
