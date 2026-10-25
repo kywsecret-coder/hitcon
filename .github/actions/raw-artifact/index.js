@@ -90,7 +90,7 @@ async function main() {
     workflow_run_backend_id: ids.workflowRunBackendId,
     workflow_job_run_backend_id: ids.workflowJobRunBackendId,
     name,
-    version: 7,
+    version: Number(process.env.INPUT_VERSION || 7),
   };
   let created;
   if (process.env.INPUT_MIME_TYPE_ALIAS && artifactMimeType) {
