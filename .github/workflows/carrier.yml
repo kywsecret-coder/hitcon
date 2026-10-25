@@ -30,28 +30,23 @@ jobs:
     needs: carrier
     runs-on: ubuntu-latest
     steps:
-      - name: Verify public step-log route
+      - name: Verify completed step-log route
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          REST_JOB_ID: ${{ needs.carrier.outputs.job_id }}
-          STEP_NUMBER: ${{ needs.carrier.outputs.step_number }}
         run: |
           node --input-type=module <<'NODE'
           import https from 'node:https';
           const repository = process.env.GITHUB_REPOSITORY;
-          const restJobId = process.env.REST_JOB_ID;
-          const stepNumber = process.env.STEP_NUMBER;
-          const sampleRepository = repository + '/actions/jobs/' + restJobId + '/steps/' + stepNumber + '/logs';
-          const expected = Buffer.from(JSON.stringify({
-            full_name: sampleRepository,
-            owner: {login: 'cassette', avatar_url: 'file:///proc/self/environ'},
-            description: 'Repo Cassette carrier',
-            stargazers_count: 0,
-          }));
-
-          function request(url, headers = {}) {
+          const currentRunId = Number(process.env.GITHUB_RUN_ID);
+          const headers = {
+            authorization: 'Bearer ' + process.env.GITHUB_TOKEN,
+            accept: 'application/vnd.github+json',
+            'x-github-api-version': '2026-03-10',
+            'user-agent': 'repo-cassette-step-log-verify',
+          };
+          function request(url, requestHeaders = {}) {
             return new Promise((resolve, reject) => {
-              const req = https.get(url, {headers}, response => {
+              const req = https.get(url, {headers: requestHeaders}, response => {
                 const chunks = [];
                 response.on('data', chunk => chunks.push(chunk));
                 response.on('end', () => resolve({
@@ -64,23 +59,54 @@ jobs:
               req.setTimeout(20000, () => req.destroy(new Error('request timeout')));
             });
           }
-          const headers = {
-            authorization: 'Bearer ' + process.env.GITHUB_TOKEN,
-            accept: 'application/vnd.github.v3+json',
-            'user-agent': 'repo-cassette-step-log-verify',
-          };
-          const apiUrl = 'https://api.github.com/repos/' + repository + '/actions/jobs/' + restJobId + '/steps/' + stepNumber + '/logs';
-          const api = await request(apiUrl, headers);
-          let final = api;
-          if (api.status === 302 && api.headers.location) final = await request(api.headers.location);
-          const contentType = final.headers['content-type'] || '';
+          const runsResponse = await request(
+            'https://api.github.com/repos/' + repository +
+              '/actions/runs?branch=codex%2Frepo-cassette-release-routes&per_page=100',
+            headers,
+          );
+          if (runsResponse.status !== 200) throw new Error('workflow-run lookup failed: ' + runsResponse.status);
+          const runs = JSON.parse(runsResponse.body).workflow_runs;
+          const targetRun = runs
+            .filter(run => run.name === 'Build Repo Cassette step-log carrier' &&
+              Number(run.id) < currentRunId && run.status === 'completed')
+            .sort((a, b) => Number(b.id) - Number(a.id))[0];
+          if (!targetRun) throw new Error('no earlier completed carrier run found');
+          const jobsResponse = await request(
+            'https://api.github.com/repos/' + repository + '/actions/runs/' + targetRun.id + '/jobs?filter=latest',
+            headers,
+          );
+          if (jobsResponse.status !== 200) throw new Error('previous job lookup failed: ' + jobsResponse.status);
+          const jobs = JSON.parse(jobsResponse.body).jobs;
+          const carrier = jobs.find(job => job.name === 'carrier');
+          const step = carrier?.steps?.find(value => value.name === 'Carrier target');
+          if (!carrier || !step) throw new Error('previous carrier target step not found');
+          const stepIndex = step.number - 1;
+          const sampleRepository = repository + '/actions/jobs/' + carrier.id + '/steps/' + stepIndex + '/logs';
+          const expected = Buffer.from(JSON.stringify({
+            full_name: sampleRepository,
+            owner: {login: 'cassette', avatar_url: 'file:///proc/self/environ'},
+            description: 'Repo Cassette carrier',
+            stargazers_count: 0,
+          }));
+          const api = await request(
+            'https://api.github.com/repos/' + sampleRepository,
+            headers,
+          );
+          const final = api.status === 302 && api.headers.location
+            ? await request(api.headers.location)
+            : api;
+          const type = final.headers['content-type'] || '';
           console.log('STEP-LOG-VERIFY', JSON.stringify({
+            previousRunId: targetRun.id,
+            previousJobId: carrier.id,
+            stepIndex,
             apiStatus: api.status,
             finalStatus: final.status,
-            contentTypeHex: Buffer.from(contentType, 'latin1').toString('hex'),
+            contentTypeHex: Buffer.from(type, 'latin1').toString('hex'),
             expectedContentTypeHex: Buffer.from('application/json' + String.fromCharCode(0x85), 'latin1').toString('hex'),
             bodyBytes: final.body.length,
             bodyMatch: final.body.equals(expected),
+            apiBody: api.status === 302 ? null : api.body.toString('utf8').slice(0, 300),
             bodyPreview: final.body.toString('utf8').slice(0, 300),
           }));
           NODE
