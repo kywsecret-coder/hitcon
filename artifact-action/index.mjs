@@ -50,35 +50,18 @@ async function finalize(name, bytes) {
 }
 
 async function race(index) {
-  const name = `cassette-race-${process.env.GITHUB_RUN_ID}-${index}-${Date.now()}`;
-  const reverse = index % 2 === 1;
-  const specs = reverse
-    ? [[7, 'application/json'], [6, weird]]
-    : [[6, weird], [7, 'application/json']];
-
-  // The race confuses the v6 MIME metadata with the v7 raw delivery mode.
-  const created = await Promise.all(specs.map(([version, mime]) => create(name, version, mime)));
+  const name = `cassette-raw-nel-${process.env.GITHUB_RUN_ID}-${index}-${Date.now()}`;
+  const artifact = await create(name, 7, weird);
   const placeholder = Buffer.from('{"probe":"placeholder"}');
-  await Promise.all(created.map((item) => upload(item.signedUploadUrl, placeholder)));
-  const finalized = await Promise.allSettled([
-    finalize(name, placeholder),
-    finalize(name, placeholder),
-  ]);
-  const artifactIds = [...new Set(finalized
-    .filter((result) => result.status === 'fulfilled')
-    .map((result) => result.value))];
-  if (!artifactIds.length) throw new Error('Both FinalizeArtifact calls failed');
-
-  for (const artifactId of artifactIds) {
-    const body = payload(artifactId);
-    await Promise.all(created.map((item) => upload(item.signedUploadUrl, body)));
-  }
-  const artifactId = artifactIds.at(-1);
-  return { name, artifactId, artifactIds, reverse, repository: `${repositoryName}/actions/artifacts/${artifactId}/zip` };
+  await upload(artifact.signedUploadUrl, placeholder);
+  const artifactId = await finalize(name, placeholder);
+  const body = payload(artifactId);
+  await upload(artifact.signedUploadUrl, body);
+  return { name, artifactId, repository: `${repositoryName}/actions/artifacts/${artifactId}/zip` };
 }
 
 const results = [];
-for (let index = 0; index < 64; index += 1) {
+for (let index = 0; index < 4; index += 1) {
   try {
     const result = await race(index);
     results.push(result);
