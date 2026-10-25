@@ -1,0 +1,68 @@
+name: Probe duplicate artifact MIME keys
+
+on:
+  push:
+    branches:
+      - codex/repo-cassette-duplicate-mime
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_ids: ${{ steps.upload.outputs.artifact_ids }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: upload
+        uses: ./duplicate-mime-action
+  verify:
+    needs: upload
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify MIME and raw artifact body
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ARTIFACT_IDS: ${{ needs.upload.outputs.artifact_ids }}
+        run: |
+          node --input-type=module <<'NODE'
+          import https from 'node:https';
+          import {createHash} from 'node:crypto';
+          const repository = process.env.GITHUB_REPOSITORY;
+          const ids = JSON.parse(process.env.ARTIFACT_IDS || '[]');
+          const headers = {authorization: 'Bearer ' + process.env.GITHUB_TOKEN, accept: 'application/vnd.github.v3+json', 'x-github-api-version': '2022-11-28', 'user-agent': 'repo-cassette-duplicate-mime-verify'};
+          function request(url, method, requestHeaders) {
+            return new Promise((resolve, reject) => {
+              const target = new URL(url);
+              const req = https.request({method, hostname: target.hostname, port: target.port || 443, path: target.pathname + target.search, headers: requestHeaders}, response => {
+                const chunks = [];
+                response.on('data', chunk => chunks.push(chunk));
+                response.on('end', () => resolve({status: response.statusCode, headers: response.headers, body: Buffer.concat(chunks)}));
+              });
+              req.on('error', reject);
+              req.setTimeout(30000, () => req.destroy(new Error('timeout')));
+              req.end();
+            });
+          }
+          for (const id of ids) {
+            const object = {full_name: repository + '/actions/artifacts/' + id + '/zip', owner: {login: 'cassette', avatar_url: 'file:///proc/self/environ'}, description: 'Repo Cassette duplicate MIME parser discriminator', stargazers_count: 0};
+            const expected = Buffer.from(JSON.stringify(object));
+            const api = await request('https://api.github.com/repos/' + repository + '/actions/artifacts/' + id + '/zip', 'GET', headers);
+            let final = api;
+            if (api.status === 302 && api.headers.location) final = await request(api.headers.location, 'GET', {});
+            const type = final.headers['content-type'] || '';
+            const nodeType = type.split(',', 1)[0].split(';', 1)[0].trim().toLowerCase();
+            const pythonType = type.split(',', 1)[0].split(';', 1)[0].replace(/^[\s\u0085]+|[\s\u0085]+$/g, '').toLowerCase();
+            const bodyMatch = final.body.equals(expected);
+            const viable = bodyMatch && nodeType === 'application/json\u0085' && pythonType === 'application/json';
+            console.log('DUPLICATE-MIME-RESULT ' + JSON.stringify({artifactId: id, apiStatus: api.status, finalStatus: final.status, contentTypeHex: Buffer.from(type, 'latin1').toString('hex'), nodeTypeHex: Buffer.from(nodeType, 'latin1').toString('hex'), bytes: final.body.length, bodyMatch, bodySha256: createHash('sha256').update(final.body).digest('hex'), viable}));
+            if (!viable) {
+              const deleted = await request('https://api.github.com/repos/' + repository + '/actions/artifacts/' + id, 'DELETE', headers);
+              console.log('CLEANUP ' + JSON.stringify({artifactId: id, status: deleted.status}));
+            } else {
+              console.log('VIABLE_ARTIFACT_ID=' + id);
+            }
+          }
+          NODE
