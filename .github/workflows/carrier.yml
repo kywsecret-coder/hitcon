@@ -1,4 +1,4 @@
-name: Repo Cassette leading NEL MIME probe
+name: Repo Cassette artifact raw route probe
 
 on:
   push:
@@ -22,23 +22,21 @@ jobs:
           payload = {
               "full_name": "pending/pending",
               "owner": {"login": "cassette", "avatar_url": "file:///proc/self/environ"},
-              "description": "Repo Cassette leading NEL MIME probe",
+              "description": "Repo Cassette raw route probe",
               "stargazers_count": 0,
           }
-          with open("carrier-prefix-nel.json", "wb") as stream:
+          with open("carrier-raw-route.json", "wb") as stream:
               stream.write(json.dumps(payload, separators=(",", ":")).encode())
           PY
-      - name: Upload v7 artifact with leading NEL MIME
+      - name: Upload v7 JSON artifact with NEL blob header
         id: carrier
-        continue-on-error: true
         uses: ./.github/actions/raw-artifact
         with:
-          path: carrier-prefix-nel.json
+          path: carrier-raw-route.json
           version: "7"
-          mime_type: "\u0085application/json"
-          blob_mime_type: "\u0085application/json"
-      - name: Inspect raw artifact response
-        if: steps.carrier.outputs.artifact-id != ''
+          mime_type: "application/json"
+          blob_mime_type: "application/json\u0085"
+      - name: Probe artifact download routes
         uses: actions/github-script@v7
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -49,19 +47,12 @@ jobs:
             const https = require('https');
             const {createHash} = require('crypto');
             const id = process.env.ARTIFACT_ID;
-            const target = new URL('https://api.github.com/repos/' + context.repo.owner + '/' +
-              context.repo.repo + '/actions/artifacts/' + id + '/zip');
+            const root = 'https://api.github.com/repos/' + context.repo.owner + '/' +
+              context.repo.repo + '/actions/artifacts/' + id;
             function request(url, headers) {
               return new Promise((resolve, reject) => {
                 https.get(url, {headers}, response => {
                   const chunks = [];
-                  for (const [key, value] of Object.entries(response.headers)) {
-                    if (key.toLowerCase() === 'content-type') {
-                      const cps = Array.from(String(value), c => c.codePointAt(0).toString(16));
-                      console.log('RAW_CT=' + JSON.stringify(value));
-                      console.log('RAW_CT_CODES=' + cps.join(','));
-                    }
-                  }
                   response.on('data', chunk => chunks.push(chunk));
                   response.on('end', () => resolve({
                     status: response.statusCode || 0,
@@ -71,28 +62,39 @@ jobs:
                 }).on('error', reject);
               });
             }
-            let response;
-            let current = target;
-            for (let hop = 0; hop < 6; hop++) {
-              const headers = {
-                accept: 'application/vnd.github.v3+json',
-                'user-agent': 'repo-cassette-probe',
-                'x-github-api-version': '2022-11-28',
-              };
-              if (current.hostname === 'api.github.com') {
-                headers.authorization = 'Bearer ' + process.env.GITHUB_TOKEN;
+            for (const suffix of ['/zip', '/raw', '/download', '/json',
+                                  '/zip?raw=1', '/zip?download=1',
+                                  '/zip?response-content-type=application%2Fjson%85',
+                                  '?raw=1', '/zip?archive_format=raw']) {
+              let current = new URL(root + suffix);
+              let response;
+              const chain = [];
+              for (let hop = 0; hop < 6; hop++) {
+                const headers = {
+                  accept: 'application/vnd.github.v3+json',
+                  'user-agent': 'repo-cassette-probe',
+                  'x-github-api-version': '2022-11-28',
+                };
+                if (current.hostname === 'api.github.com') {
+                  headers.authorization = 'Bearer ' + process.env.GITHUB_TOKEN;
+                }
+                response = await request(current, headers);
+                chain.push(response.status + '@' + current.host);
+                if (response.status >= 300 && response.status < 400 && response.headers.location) {
+                  current = new URL(response.headers.location, current);
+                  continue;
+                }
+                break;
               }
-              response = await request(current, headers);
-              if (response.status >= 300 && response.status < 400 && response.headers.location) {
-                current = new URL(response.headers.location, current);
-                continue;
-              }
-              break;
+              const type = String(response.headers['content-type'] || '');
+              const prefix = response.body.subarray(0, 32).toString('hex');
+              console.log('ROUTE=' + suffix + ' CHAIN=' + chain.join('>') +
+                ' CT=' + JSON.stringify(type) +
+                ' CT_CODES=' + Array.from(type, c => c.codePointAt(0).toString(16)).join(',') +
+                ' BYTES=' + response.body.length +
+                ' SHA256=' + createHash('sha256').update(response.body).digest('hex') +
+                ' PREFIX=' + prefix);
             }
-            console.log('ARTIFACT_ID=' + id);
-            console.log('HTTP_STATUS=' + response.status + ' HOST=' + current.host);
-            console.log('BYTES=' + response.body.length);
-            console.log('SHA256=' + createHash('sha256').update(response.body).digest('hex'));
       - name: Remove probe artifacts from this branch
         if: always()
         uses: actions/github-script@v7
