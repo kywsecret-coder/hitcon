@@ -98,7 +98,8 @@ async function pendingTrial(index, firstVersion) {
   const row = {kind: 'pending', index, firstVersion, first, deleted, second, final, view};
   if (view.rsct?.includes('\u0085') && final.id) {
     row.repository = await putCarrier([first.url, second.url], final.id);
-    console.log(`WINNER ${JSON.stringify(row)}`);
+    const safe = {...row, first: {...row.first, url: undefined}, second: {...row.second, url: undefined}};
+    console.log(`WINNER ${JSON.stringify(safe)}`);
   }
   return row;
 }
