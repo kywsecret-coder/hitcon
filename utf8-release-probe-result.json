@@ -1,0 +1,9 @@
+{
+  "tag": "codex-rctf-utf8-asset-probe-20261025",
+  "repo": "kywsecret-coder/hitcon",
+  "create_release_status": 201,
+  "upload_status": 201,
+  "error": "asset upload failed: 68E\r\n{\"url\":\"https://api.github.com/repos/kywsecret-coder/hitcon/releases/assets/674613081\",\"id\":674613081,\"node_id\":\"RA_kwDOVWczEc4oNcdZ\",\"name\":\"repo-cassette-utf8.json\",\"label\":\"\",\"uploader\":{\"login\":\"github-actions[bot]\",\"id\":41898282,\"node_id\":\"MDM6Qm90NDE4OTgyODI=\",\"avatar_url\":\"https://avatar",
+  "cleanup_release_status": 204,
+  "cleanup_tag_status": 204
+}
