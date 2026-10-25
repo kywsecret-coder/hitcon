@@ -1,0 +1,40 @@
+name: Probe job-level Actions Results logs
+
+on:
+  push:
+    branches: [codex/repo-cassette-joblogs]
+    paths:
+      - '.github/workflows/joblogs-probe.yml'
+      - 'carrier-joblogs/**'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  carrier:
+    runs-on: ubuntu-latest
+    outputs:
+      job_id: ${{ steps.upload.outputs.job-id }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: upload
+        uses: ./carrier-joblogs
+        with:
+          mode: upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HOLD_SECONDS: '0'
+
+  completed-readback:
+    needs: carrier
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./carrier-joblogs
+        with:
+          mode: read
+          target-job-id: ${{ needs.carrier.outputs.job_id }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+

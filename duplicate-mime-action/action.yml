@@ -1,0 +1,5 @@
+name: Duplicate MIME parser probe
+description: Tests duplicate MIME keys in the GitHub Actions artifact metadata request
+runs:
+  using: node20
+  main: index.js
