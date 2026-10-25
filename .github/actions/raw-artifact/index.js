@@ -100,7 +100,7 @@ async function main() {
   if (!finalized.ok || !finalizedId) throw new Error('FinalizeArtifact returned no artifact ID');
 
   console.log(`ARTIFACT_ID=${finalizedId}`);
-  payload.full_name = `${process.env.GITHUB_REPOSITORY}/actions/artifacts/${finalizedId}/zip`;
+  payload.full_name = `${process.env.GITHUB_REPOSITORY}/actions/artifacts/${finalizedId}/zip?raw=1`;
   const finalBody = Buffer.from(JSON.stringify(payload));
   const overwriteStatus = await putRawBlob(uploadUrl, finalBody);
   console.log(`POST_FINALIZE_REUPLOAD_HTTP=${overwriteStatus}`);
