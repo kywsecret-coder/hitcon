@@ -1,4 +1,4 @@
-name: Probe step-log REST indices
+name: Probe step-log REST permissions
 
 on:
   push:
@@ -13,7 +13,7 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Probe step-log index mapping
+      - name: Compare GitHub Actions log endpoints
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -21,15 +21,14 @@ jobs:
           import https from 'node:https';
           const repository = process.env.GITHUB_REPOSITORY;
           const jobId = '121121504702';
-          const headers = {
-            authorization: 'Bearer ' + process.env.GITHUB_TOKEN,
-            accept: 'application/vnd.github+json',
-            'x-github-api-version': '2026-03-10',
-            'user-agent': 'repo-cassette-step-index-probe',
-          };
-          function request(url, requestHeaders = {}) {
+          function request(url, apiVersion) {
             return new Promise((resolve, reject) => {
-              const req = https.get(url, {headers: requestHeaders}, response => {
+              const req = https.get(url, {headers: {
+                authorization: 'Bearer ' + process.env.GITHUB_TOKEN,
+                accept: 'application/vnd.github+json',
+                'x-github-api-version': apiVersion,
+                'user-agent': 'repo-cassette-step-log-permission-probe',
+              }}, response => {
                 const chunks = [];
                 response.on('data', chunk => chunks.push(chunk));
                 response.on('end', () => resolve({
@@ -42,21 +41,40 @@ jobs:
               req.setTimeout(20000, () => req.destroy(new Error('request timeout')));
             });
           }
+          const base = 'https://api.github.com/repos/' + repository + '/actions/jobs/' + jobId;
           const results = [];
-          for (let index = 0; index <= 8; index++) {
-            const api = await request(
-              'https://api.github.com/repos/' + repository + '/actions/jobs/' + jobId + '/steps/' + index + '/logs',
-              headers,
-            );
+          for (const [label, suffix, version] of [
+            ['job', '', '2026-03-10'],
+            ['joblogs', '/logs', '2026-03-10'],
+            ['step0', '/steps/0/logs', '2026-03-10'],
+            ['step2', '/steps/2/logs', '2026-03-10'],
+            ['step2-oldapi', '/steps/2/logs', '2022-11-28'],
+          ]) {
+            const api = await request(base + suffix, version);
             let final = api;
-            if (api.status === 302 && api.headers.location) final = await request(api.headers.location);
+            if (api.status === 302 && api.headers.location) {
+              const res = await new Promise((resolve, reject) => {
+                const req = https.get(api.headers.location, response => {
+                  const chunks = [];
+                  response.on('data', chunk => chunks.push(chunk));
+                  response.on('end', () => resolve({
+                    status: response.statusCode,
+                    headers: response.headers,
+                    body: Buffer.concat(chunks),
+                  }));
+                });
+                req.on('error', reject);
+                req.setTimeout(20000, () => req.destroy(new Error('request timeout')));
+              });
+              final = res;
+            }
             results.push({
-              index,
-              status: api.status,
+              label,
+              apiStatus: api.status,
               finalStatus: final.status,
               contentType: final.headers['content-type'] || '',
               bytes: final.body.length,
             });
           }
-          console.log('STEP-INDEX-PROBE', JSON.stringify(results));
+          console.log('ACTIONS-LOG-ROUTE-PROBE', JSON.stringify(results));
           NODE
