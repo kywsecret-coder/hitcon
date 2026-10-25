@@ -1,4 +1,4 @@
-name: Repo Cassette MIME whitespace parameter probe
+name: Repo Cassette FinalizeArtifact MIME field probe
 
 on:
   push:
@@ -21,14 +21,16 @@ jobs:
           payload = {
               "full_name": "pending/pending",
               "owner": {"login": "cassette", "avatar_url": "file:///proc/self/environ"},
-              "description": "Repo Cassette MIME whitespace parameter probe",
+              "description": "Repo Cassette FinalizeArtifact MIME field probe",
               "stargazers_count": 0,
           }
           with open("carrier.json", "wb") as stream:
               stream.write(json.dumps(payload, separators=(",", ":")).encode())
           PY
-      - name: Create raw artifact with NEL before MIME parameters
+      - name: Finalize raw artifact with MIME override probe
         uses: ./.github/actions/raw-artifact
+        env:
+          FINALIZE_MIME_TYPE: "application/json\u0085"
         with:
           path: carrier.json
-          mime_type: "application/json\u0085; charset=utf-8"
+          mime_type: application/json
