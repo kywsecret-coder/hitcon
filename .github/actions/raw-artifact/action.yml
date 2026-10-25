@@ -10,6 +10,9 @@ inputs:
   blob_mime_type:
     description: Optional MIME value on the raw Azure blob upload
     required: false
+  version:
+    description: Artifact protocol version (defaults to 7)
+    required: false
   mime_type_alias:
     description: Second raw JSON mime_type key for parser behavior probe
     required: false
