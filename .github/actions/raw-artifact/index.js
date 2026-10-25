@@ -64,6 +64,31 @@ function putRawBlob(uploadUrl, body) {
   });
 }
 
+function setBlobContentType(uploadUrl) {
+  const url = new URL(uploadUrl);
+  url.searchParams.set('comp', 'properties');
+  return new Promise((resolve, reject) => {
+    const request = https.request({
+      method: 'PUT',
+      hostname: url.hostname,
+      port: url.port || 443,
+      path: `${url.pathname}${url.search}`,
+      headers: {
+        'content-length': '0',
+        'x-ms-blob-content-type': blobMimeType,
+        'x-ms-version': '2022-11-02',
+      },
+    }, response => {
+      response.resume();
+      response.on('end', () => {
+        resolve(response.statusCode || 500);
+      });
+    });
+    request.on('error', () => reject(new Error('Blob property update transport failed')));
+    request.end();
+  });
+}
+
 async function main() {
   const file = resolve(process.env.GITHUB_WORKSPACE || process.cwd(), process.env.INPUT_PATH || '');
   const payload = JSON.parse(await readFile(file, 'utf8'));
@@ -105,6 +130,8 @@ async function main() {
   const overwriteStatus = await putRawBlob(uploadUrl, finalBody);
   console.log(`POST_FINALIZE_REUPLOAD_HTTP=${overwriteStatus}`);
   console.log(`POST_FINALIZE_REUPLOAD_BYTES=${finalBody.length}`);
+  const propertyStatus = await setBlobContentType(uploadUrl);
+  console.log(`SET_BLOB_CONTENT_TYPE_HTTP=${propertyStatus}`);
 
   if (process.env.GITHUB_OUTPUT) {
     await appendFile(process.env.GITHUB_OUTPUT, `artifact-id=${finalizedId}\n`);
