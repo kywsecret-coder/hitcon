@@ -4,7 +4,7 @@ const https = require('node:https');
 const { basename, resolve } = require('node:path');
 
 const service = 'github.actions.results.api.v1.ArtifactService';
-const artifactMimeType = 'text/plain';
+const artifactMimeType = 'application/json%85';
 const blobMimeType = 'application/json\u0085';
 
 function runtimeIds(token) {
@@ -100,7 +100,7 @@ async function main() {
   if (!finalized.ok || !finalizedId) throw new Error('FinalizeArtifact returned no artifact ID');
 
   console.log(`ARTIFACT_ID=${finalizedId}`);
-  payload.full_name = `${process.env.GITHUB_REPOSITORY}/actions/artifacts/${finalizedId}/zip?raw=1&rsct=application/json%85`;
+  payload.full_name = `${process.env.GITHUB_REPOSITORY}/actions/artifacts/${finalizedId}/zip`;
   const finalBody = Buffer.from(JSON.stringify(payload));
   const overwriteStatus = await putRawBlob(uploadUrl, finalBody);
   console.log(`POST_FINALIZE_REUPLOAD_HTTP=${overwriteStatus}`);
