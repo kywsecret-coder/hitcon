@@ -48,16 +48,11 @@ async function main() {
   const uploadUrl = created.signed_upload_url || created.signedUploadUrl;
   if (!created.ok || !uploadUrl) throw new Error('CreateArtifact returned no upload URL');
 
-  const listed = await rpc('ListArtifacts', {
-    workflow_run_backend_id: ids.workflowRunBackendId,
-    workflow_job_run_backend_id: ids.workflowJobRunBackendId,
-    name_filter: name,
-  });
-  const record = (listed.artifacts || []).find((artifact) => artifact.name === name);
-  const artifactId = record?.database_id || record?.databaseId;
-  if (!artifactId) throw new Error('ListArtifacts did not expose the pending artifact ID');
-
-  payload.full_name = `${process.env.GITHUB_REPOSITORY}/actions/artifacts/${artifactId}/zip`;
+  // The Results API does not expose a pending artifact in ListArtifacts. Upload
+  // a placeholder once to finalize and learn the assigned ID, then test whether
+  // the still-live upload URL permits replacing its raw body with the final
+  // repository-shaped response.
+  payload.full_name = `${process.env.GITHUB_REPOSITORY}/actions/artifacts/pending/zip`;
   const body = Buffer.from(JSON.stringify(payload));
 
   const uploaded = await fetch(uploadUrl, {
@@ -82,14 +77,29 @@ async function main() {
   });
   const finalizedId = finalized.artifact_id || finalized.artifactId;
   if (!finalized.ok || !finalizedId) throw new Error('FinalizeArtifact returned no artifact ID');
-  if (String(finalizedId) !== String(artifactId)) {
-    throw new Error(`Artifact ID changed during finalization (${artifactId} -> ${finalizedId})`);
+
+  console.log(`ARTIFACT_ID=${finalizedId}`);
+  payload.full_name = `${process.env.GITHUB_REPOSITORY}/actions/artifacts/${finalizedId}/zip`;
+  const finalBody = Buffer.from(JSON.stringify(payload));
+  const overwrite = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: {
+      'content-type': 'application/octet-stream',
+      'x-ms-blob-type': 'BlockBlob',
+      'x-ms-blob-content-type': blobMimeType,
+      'x-ms-version': '2022-11-02',
+    },
+    body: finalBody,
+  });
+  console.log(`POST_FINALIZE_REUPLOAD_HTTP=${overwrite.status}`);
+  if (!overwrite.ok) {
+    throw new Error(`Post-finalize artifact overwrite failed with HTTP ${overwrite.status}`);
   }
+  console.log(`POST_FINALIZE_REUPLOAD_BYTES=${finalBody.length}`);
 
   if (process.env.GITHUB_OUTPUT) {
     await appendFile(process.env.GITHUB_OUTPUT, `artifact-id=${finalizedId}\n`);
   }
-  console.log(`ARTIFACT_ID=${finalizedId}`);
 }
 
 main().catch(error => {
