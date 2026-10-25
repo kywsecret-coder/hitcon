@@ -47,8 +47,43 @@ jobs:
             const https = require('https');
             const {createHash} = require('crypto');
             const id = process.env.ARTIFACT_ID;
-            const url = 'https://api.github.com/repos/' + context.repo.owner + '/' +
+            const base = 'https://api.github.com/repos/' + context.repo.owner + '/' +
               context.repo.repo + '/actions/artifacts/' + id + '/zip';
+            const candidates = [
+              ['base', base],
+              ['rsct_nel', base + '?rsct=application%2Fjson%85'],
+              ['response_content_type_nel', base + '?response-content-type=application%2Fjson%85'],
+              ['rsct_fs', base + '?rsct=application%2Fjson%1c'],
+              ['duplicate_rsct', base + '?rsct=application%2Fjson&rsct=application%2Fjson%85'],
+            ];
+            for (const [label, candidate] of candidates) {
+            let current = new URL(candidate);
+            let response;
+            for (let hop = 0; hop < 6; hop++) {
+              const headers = {
+                accept: 'application/vnd.github.v3+json',
+                'user-agent': 'repo-cassette-probe',
+                'x-github-api-version': '2022-11-28',
+              };
+              if (current.hostname === 'api.github.com') {
+                headers.authorization = 'Bearer ' + process.env.GITHUB_TOKEN;
+              }
+              response = await request(current, headers);
+              if (response.status >= 300 && response.status < 400 && response.headers.location) {
+                current = new URL(response.headers.location, current);
+                continue;
+              }
+              break;
+            }
+            const type = response.headers['content-type'] || '';
+            console.log('CANDIDATE=' + label +
+              ' STATUS=' + response.status +
+              ' HOST=' + current.host +
+              ' CONTENT_TYPE=' + JSON.stringify(type) +
+              ' CT_CODES=' + Array.from(type, ch => ch.codePointAt(0).toString(16)).join(',') +
+              ' BYTES=' + response.body.length +
+              ' SHA256=' + createHash('sha256').update(response.body).digest('hex'));
+
             function request(target, headers) {
               return new Promise((resolve, reject) => {
                 https.get(target, {headers}, response => {
@@ -80,19 +115,5 @@ jobs:
               }
               break;
             }
-            const type = response.headers['content-type'] || '';
-            console.log('ARTIFACT_ID=' + id);
-            console.log('ARTIFACT_RESPONSE_STATUS=' + response.status);
-            console.log('ARTIFACT_RESPONSE_HOST=' + current.host);
-            console.log('ARTIFACT_RESPONSE_CONTENT_TYPE=' + JSON.stringify(type));
-            console.log('ARTIFACT_RESPONSE_CT_CODES=' + Array.from(type, ch => ch.codePointAt(0).toString(16)).join(','));
-            console.log('ARTIFACT_RESPONSE_BYTES=' + response.body.length);
-            console.log('ARTIFACT_RESPONSE_SHA256=' + createHash('sha256').update(response.body).digest('hex'));
-            console.log('ARTIFACT_RESPONSE_PREFIX_HEX=' + response.body.subarray(0, 32).toString('hex'));
-            try {
-              const body = JSON.parse(response.body.toString('utf8'));
-              console.log('ARTIFACT_RESPONSE_FULL_NAME=' + JSON.stringify(body.full_name));
-              console.log('ARTIFACT_RESPONSE_AVATAR=' + JSON.stringify(body.owner?.avatar_url));
-            } catch {
-              console.log('ARTIFACT_RESPONSE_JSON=false');
+            console.log('PREFIX_HEX=' + response.body.subarray(0, 24).toString('hex'));
             }
