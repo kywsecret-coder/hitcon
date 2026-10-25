@@ -1,4 +1,4 @@
-name: Verify completed step-log route
+name: Probe step-log REST indices
 
 on:
   push:
@@ -10,31 +10,22 @@ permissions:
   contents: read
 
 jobs:
-  verify-prior-run:
+  probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Verify finished carrier step
+      - name: Probe step-log index mapping
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           node --input-type=module <<'NODE'
           import https from 'node:https';
           const repository = process.env.GITHUB_REPOSITORY;
-          const targetRunId = '40177579381';
-          const targetJobId = '121121504702';
-          const targetStepIndex = 3;
-          const sampleRepository = repository + '/actions/jobs/' + targetJobId + '/steps/' + targetStepIndex + '/logs';
-          const expected = Buffer.from(JSON.stringify({
-            full_name: sampleRepository,
-            owner: {login: 'cassette', avatar_url: 'file:///proc/self/environ'},
-            description: 'Repo Cassette carrier',
-            stargazers_count: 0,
-          }));
+          const jobId = '121121504702';
           const headers = {
             authorization: 'Bearer ' + process.env.GITHUB_TOKEN,
             accept: 'application/vnd.github+json',
             'x-github-api-version': '2026-03-10',
-            'user-agent': 'repo-cassette-step-log-postverify',
+            'user-agent': 'repo-cassette-step-index-probe',
           };
           function request(url, requestHeaders = {}) {
             return new Promise((resolve, reject) => {
@@ -51,31 +42,21 @@ jobs:
               req.setTimeout(20000, () => req.destroy(new Error('request timeout')));
             });
           }
-          let run;
-          for (let attempt = 0; attempt < 60; attempt++) {
-            const response = await request('https://api.github.com/repos/' + repository + '/actions/runs/' + targetRunId, headers);
-            if (response.status === 200) {
-              run = JSON.parse(response.body);
-              if (run.status === 'completed') break;
-            }
-            await new Promise(resolve => setTimeout(resolve, 1000));
+          const results = [];
+          for (let index = 0; index <= 8; index++) {
+            const api = await request(
+              'https://api.github.com/repos/' + repository + '/actions/jobs/' + jobId + '/steps/' + index + '/logs',
+              headers,
+            );
+            let final = api;
+            if (api.status === 302 && api.headers.location) final = await request(api.headers.location);
+            results.push({
+              index,
+              status: api.status,
+              finalStatus: final.status,
+              contentType: final.headers['content-type'] || '',
+              bytes: final.body.length,
+            });
           }
-          const api = await request(
-            'https://api.github.com/repos/' + repository + '/actions/jobs/' + targetJobId + '/steps/' + targetStepIndex + '/logs',
-            headers,
-          );
-          const final = api.status === 302 && api.headers.location
-            ? await request(api.headers.location)
-            : api;
-          const type = final.headers['content-type'] || '';
-          console.log('POSTVERIFY-STEP-LOG', JSON.stringify({
-            targetRunStatus: run?.status || null,
-            apiStatus: api.status,
-            finalStatus: final.status,
-            contentTypeHex: Buffer.from(type, 'latin1').toString('hex'),
-            expectedContentTypeHex: Buffer.from('application/json' + String.fromCharCode(0x85), 'latin1').toString('hex'),
-            bodyBytes: final.body.length,
-            bodyMatch: final.body.equals(expected),
-            bodyPreview: final.body.toString('utf8').slice(0, 300),
-          }));
+          console.log('STEP-INDEX-PROBE', JSON.stringify(results));
           NODE
