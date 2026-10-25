@@ -60,7 +60,7 @@ function putRawBlob(uploadUrl, body) {
       port: url.port || 443,
       path: `${url.pathname}${url.search}`,
       headers: {
-        'content-type': 'application/octet-stream',
+        'content-type': blobMimeType || 'application/octet-stream',
         'content-length': String(body.length),
         'x-ms-blob-type': 'BlockBlob',
         ...(blobMimeType ? { 'x-ms-blob-content-type': blobMimeType } : {}),
