@@ -25,7 +25,10 @@ async function rpc(method, body) {
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!response.ok) throw new Error(`${method} failed with HTTP ${response.status}`);
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 1000);
+    throw new Error(`${method} failed with HTTP ${response.status}: ${detail}`);
+  }
   return response.json();
 }
 
