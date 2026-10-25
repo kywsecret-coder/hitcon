@@ -1,12 +1,68 @@
-name: Repo Cassette carrier
+name: Repo Cassette MIME fallback probe
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - codex/repo-cassette-carrier
 
-permissions: {}
+permissions:
+  actions: read
+  contents: read
 
 jobs:
-  disabled:
+  carrier:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Carrier workflow disabled pending a validated non-ZIP route."
+      - uses: actions/checkout@v4
+      - name: Create repository-shaped test response
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          payload = {
+              "full_name": "pending/pending",
+              "owner": {"login": "cassette", "avatar_url": "file:///proc/self/environ"},
+              "description": "Repo Cassette MIME fallback probe",
+              "stargazers_count": 0,
+          }
+          with open("carrier.json", "wb") as stream:
+              stream.write(json.dumps(payload, separators=(",", ":")).encode())
+          PY
+      - name: Upload without ArtifactService MIME metadata
+        id: carrier
+        uses: ./.github/actions/raw-artifact
+        with:
+          path: carrier.json
+          mime_type: ""
+          blob_mime_type: "application/json\\u0085"
+      - name: Inspect completed raw API representation
+        env:
+          ARTIFACT_ID: ${{ steps.carrier.outputs.artifact-id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node --input-type=module <<'JS'
+          import { createHash } from 'node:crypto';
+          const url = 'https://api.github.com/repos/' + process.env.GITHUB_REPOSITORY +
+            '/actions/artifacts/' + process.env.ARTIFACT_ID + '/zip';
+          const response = await fetch(url, {
+            headers: {
+              accept: 'application/vnd.github.v3+json',
+              authorization: 'Bearer ' + process.env.GH_TOKEN,
+            },
+          });
+          const bytes = Buffer.from(await response.arrayBuffer());
+          const type = response.headers.get('content-type') || '';
+          console.log('ARTIFACT_ID=' + process.env.ARTIFACT_ID);
+          console.log('RAW_API_STATUS=' + response.status);
+          console.log('RAW_API_CONTENT_TYPE=' + JSON.stringify(type));
+          console.log('RAW_API_CONTENT_TYPE_CODEPOINTS=' +
+            Array.from(type, c => c.codePointAt(0).toString(16)).join(','));
+          console.log('RAW_API_BODY_BYTES=' + bytes.length);
+          console.log('RAW_API_BODY_SHA256=' + createHash('sha256').update(bytes).digest('hex'));
+          try {
+            const doc = JSON.parse(bytes.toString('utf8'));
+            console.log('RAW_API_FULL_NAME=' + (doc.full_name || ''));
+          } catch {
+            console.log('RAW_API_JSON=false');
+          }
+          JS
