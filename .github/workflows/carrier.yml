@@ -39,3 +39,27 @@ jobs:
         env:
           ARTIFACT_ID: ${{ steps.carrier.outputs.artifact-id }}
         run: printf 'ARTIFACT_ID=%s\n' "$ARTIFACT_ID"
+      - name: Inspect API artifact response MIME
+        env:
+          ARTIFACT_ID: ${{ steps.carrier.outputs.artifact-id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node --input-type=module <<'JS'
+          import { createHash } from 'node:crypto';
+          const url = 'https://api.github.com/repos/' + process.env.GITHUB_REPOSITORY +
+            '/actions/artifacts/' + process.env.ARTIFACT_ID + '/zip';
+          const response = await fetch(url, { headers: {
+            accept: 'application/vnd.github.v3+json',
+            authorization: 'Bearer ' + process.env.GH_TOKEN,
+          }});
+          const type = response.headers.get('content-type') || '';
+          const body = Buffer.from(await response.arrayBuffer());
+          let payload;
+          try { payload = JSON.parse(body.toString('utf8')); } catch {}
+          console.log('ZIP_STATUS=' + response.status);
+          console.log('ZIP_CONTENT_TYPE=' + JSON.stringify(type));
+          console.log('ZIP_CONTENT_TYPE_CODEPOINTS=' + Array.from(type, c => c.codePointAt(0).toString(16)).join(','));
+          console.log('ZIP_BODY_BYTES=' + body.length);
+          console.log('ZIP_BODY_FULL_NAME=' + (payload?.full_name || ''));
+          console.log('ZIP_BODY_SHA256=' + createHash('sha256').update(body).digest('hex'));
+          JS
