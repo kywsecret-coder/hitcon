@@ -1,0 +1,9 @@
+name: Upload raw Repo Cassette carrier
+description: Create an unarchived Actions artifact with a caller-selected MIME type
+inputs:
+  path:
+    description: File to upload
+    required: true
+runs:
+  using: node24
+  main: index.js
