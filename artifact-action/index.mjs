@@ -51,8 +51,8 @@ async function finalize(name, bytes) {
 
 async function race(index) {
   const name = `cassette-sequential-${process.env.GITHUB_RUN_ID}-${index}-${Date.now()}`;
-  const legacy = await create(name, 6, weird);
   const raw = await create(name, 7, 'application/json');
+  const legacy = await create(name, 6, weird);
   const placeholder = Buffer.from('{"probe":"placeholder"}');
   await upload(legacy.signedUploadUrl, placeholder, weird);
   await upload(raw.signedUploadUrl, placeholder, 'application/json');
