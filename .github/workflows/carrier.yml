@@ -1,6 +1,8 @@
 name: Repo Cassette carrier
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -28,7 +30,7 @@ jobs:
           with open("carrier.json", "wb") as stream:
               stream.write(json.dumps(payload, separators=(",", ":")).encode())
           PY
-      - name: Upload raw JSON with a leading-NEL artifact MIME
+      - name: Upload raw JSON with a MIME casing differential
         id: carrier
         uses: ./.github/actions/raw-artifact
         with:
