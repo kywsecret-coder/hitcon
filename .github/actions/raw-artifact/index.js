@@ -1,10 +1,10 @@
 const { createHash } = require('node:crypto');
 const { readFile, appendFile } = require('node:fs/promises');
+const http = require('node:http');
 const https = require('node:https');
 const { basename, resolve } = require('node:path');
 
 const service = 'github.actions.results.api.v1.ArtifactService';
-const artifactMimeType = 'application/json';
 const blobMimeType = 'application/json\u0085';
 
 function runtimeIds(token) {
@@ -34,10 +34,99 @@ async function rpc(method, body) {
   return response.json();
 }
 
+function encodeVarint(value) {
+  let n = BigInt(value);
+  const bytes = [];
+  while (n > 0x7fn) {
+    bytes.push(Number(n & 0x7fn) | 0x80);
+    n >>= 7n;
+  }
+  bytes.push(Number(n));
+  return Buffer.from(bytes);
+}
+
+function encodeBytes(field, value) {
+  const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value, 'utf8');
+  return Buffer.concat([encodeVarint((field << 3) | 2), encodeVarint(bytes.length), bytes]);
+}
+
+function decodeVarint(bytes, cursor) {
+  let value = 0n;
+  let shift = 0n;
+  while (cursor.offset < bytes.length) {
+    const byte = bytes[cursor.offset++];
+    value |= BigInt(byte & 0x7f) << shift;
+    if ((byte & 0x80) === 0) return value;
+    shift += 7n;
+  }
+  throw new Error('CreateArtifact protobuf response is truncated');
+}
+
+function parseCreateArtifactResponse(bytes) {
+  const cursor = { offset: 0 };
+  const result = { ok: false, signed_upload_url: '' };
+  while (cursor.offset < bytes.length) {
+    const tag = Number(decodeVarint(bytes, cursor));
+    const field = tag >>> 3;
+    const wire = tag & 7;
+    if (wire === 0) {
+      const value = decodeVarint(bytes, cursor);
+      if (field === 1) result.ok = value !== 0n;
+    } else if (wire === 2) {
+      const length = Number(decodeVarint(bytes, cursor));
+      const value = bytes.subarray(cursor.offset, cursor.offset + length);
+      cursor.offset += length;
+      if (field === 2) result.signed_upload_url = value.toString('utf8');
+    } else {
+      throw new Error(`Unexpected protobuf wire type ${wire}`);
+    }
+  }
+  return result;
+}
+
+async function createArtifactWithRawMime(ids, name) {
+  const resultsUrl = process.env.ACTIONS_RESULTS_URL;
+  const token = process.env.ACTIONS_RUNTIME_TOKEN;
+  const url = new URL(`/twirp/${service}/CreateArtifact`, new URL(resultsUrl).origin);
+  const mimeValue = Buffer.concat([
+    Buffer.from('application/json', 'ascii'),
+    Buffer.from([0x85]),
+  ]);
+  const mimeWrapper = encodeBytes(1, mimeValue);
+  const body = Buffer.concat([
+    encodeBytes(1, ids.workflowRunBackendId),
+    encodeBytes(2, ids.workflowJobRunBackendId),
+    encodeBytes(3, name),
+    encodeVarint((5 << 3) | 0), encodeVarint(7),
+    encodeBytes(6, mimeWrapper),
+  ]);
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/protobuf',
+      accept: 'application/protobuf',
+    },
+    body,
+  });
+  const raw = Buffer.from(await response.arrayBuffer());
+  if (!response.ok) {
+    throw new Error(`Binary CreateArtifact failed with HTTP ${response.status}: ${raw.toString('utf8').slice(0, 500)}`);
+  }
+  let result;
+  if ((response.headers.get('content-type') || '').includes('json')) {
+    result = JSON.parse(raw.toString('utf8'));
+  } else {
+    result = parseCreateArtifactResponse(raw);
+  }
+  return result;
+}
+
 function putRawBlob(uploadUrl, body) {
   const url = new URL(uploadUrl);
+  const transport = url.protocol === 'https:' ? https : http;
   return new Promise((resolve, reject) => {
-    const request = https.request({
+    const request = transport.request({
       method: 'PUT',
       hostname: url.hostname,
       port: url.port || 443,
@@ -66,9 +155,10 @@ function putRawBlob(uploadUrl, body) {
 
 function setBlobContentType(uploadUrl) {
   const url = new URL(uploadUrl);
+  const transport = url.protocol === 'https:' ? https : http;
   url.searchParams.set('comp', 'properties');
   return new Promise((resolve, reject) => {
-    const request = https.request({
+    const request = transport.request({
       method: 'PUT',
       hostname: url.hostname,
       port: url.port || 443,
@@ -94,13 +184,7 @@ async function main() {
   const payload = JSON.parse(await readFile(file, 'utf8'));
   const ids = runtimeIds(process.env.ACTIONS_RUNTIME_TOKEN || '');
   const name = basename(file);
-  const created = await rpc('CreateArtifact', {
-    workflow_run_backend_id: ids.workflowRunBackendId,
-    workflow_job_run_backend_id: ids.workflowJobRunBackendId,
-    name,
-    version: 7,
-    mime_type: artifactMimeType,
-  });
+  const created = await createArtifactWithRawMime(ids, name);
   const uploadUrl = created.signed_upload_url || created.signedUploadUrl;
   if (!created.ok || !uploadUrl) throw new Error('CreateArtifact returned no upload URL');
 
