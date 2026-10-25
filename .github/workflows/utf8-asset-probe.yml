@@ -57,7 +57,7 @@ jobs:
             const chunks = [];
             let offset = 0;
             while (offset < bytes.length) {
-              const lineEnd = bytes.indexOf(Buffer.from('\\r\\n'), offset);
+              const lineEnd = bytes.indexOf(Buffer.from('\r\n'), offset);
               if (lineEnd < 0) throw new Error('malformed chunked response');
               const sizeText = bytes.subarray(offset, lineEnd).toString('ascii').split(';')[0];
               const size = Number.parseInt(sizeText, 16);
