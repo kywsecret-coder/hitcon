@@ -3,7 +3,7 @@ name: Repo Cassette release MIME probe
 on:
   push:
     branches:
-      - codex/repo-cassette-carrier
+      - codex/repo-cassette-release-routes
 
 permissions:
   contents: write
@@ -63,6 +63,22 @@ jobs:
 
             async function inspectAsset(asset) {
               console.log('ASSET_REPORTED_CONTENT_TYPE=' + JSON.stringify(asset.content_type));
+              const candidateUrls = [
+                'https://api.github.com/repos/' + owner + '/' + repo + '/releases/download/' + tag + '/' + asset.name,
+                'https://api.github.com/repos/' + owner + '/' + repo + '/releases/assets/' + asset.id + '/download',
+                'https://api.github.com/repos/' + owner + '/' + repo + '/releases/assets/' + asset.id + '?download=1',
+                'https://api.github.com/repos/' + owner + '/' + repo + '/releases/assets/' + asset.id + '?raw=1',
+                'https://api.github.com/repos/' + owner + '/' + repo + '/downloads/assets/' + asset.id,
+              ];
+              for (const candidate of candidateUrls) {
+                const {response, host} = await follow(candidate, 'application/vnd.github.v3+json');
+                console.log('CANDIDATE_ROUTE status=' + response.status +
+                  ' host=' + host +
+                  ' content_type=' + JSON.stringify(response.headers['content-type'] || '') +
+                  ' bytes=' + response.body.length +
+                  ' sha256=' + createHash('sha256').update(response.body).digest('hex') +
+                  ' prefix_hex=' + response.body.subarray(0, 24).toString('hex'));
+              }
               console.log('ASSET_SIZE=' + asset.size);
               for (const accept of [
                 'application/vnd.github.v3+json',
