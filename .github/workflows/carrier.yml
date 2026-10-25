@@ -48,21 +48,30 @@ jobs:
           import { createHash } from 'node:crypto';
           const url = 'https://api.github.com/repos/' + process.env.GITHUB_REPOSITORY +
             '/actions/artifacts/' + process.env.ARTIFACT_ID + '/zip';
-          const response = await fetch(url, {
-            headers: {
-              accept: 'application/vnd.github.v3+json',
-              authorization: 'Bearer ' + process.env.GH_TOKEN,
-            },
-          });
-          const contentType = response.headers.get('content-type') || '';
-          const bytes = Buffer.from(await response.arrayBuffer());
-          let payload;
-          try { payload = JSON.parse(bytes.toString('utf8')); } catch {}
-          console.log('DOWNLOAD_STATUS=' + response.status);
-          console.log('DOWNLOAD_CONTENT_TYPE=' + JSON.stringify(contentType));
-          console.log('DOWNLOAD_CONTENT_TYPE_CODEPOINTS=' +
-            Array.from(contentType, c => c.codePointAt(0).toString(16)).join(','));
-          console.log('DOWNLOAD_BODY_BYTES=' + bytes.length);
-          console.log('DOWNLOAD_BODY_SHA256=' + createHash('sha256').update(bytes).digest('hex'));
-          console.log('DOWNLOAD_BODY_FULL_NAME=' + (payload?.full_name || ''));
+          const queries = [
+            ['default', ''],
+            ['raw', '?raw=1'],
+            ['download', '?download=1'],
+            ['response-content-type', '?response-content-type=application%2Fjson%C2%85'],
+            ['rsct', '?rsct=application%2Fjson%C2%85'],
+          ];
+          for (const [label, query] of queries) {
+            const response = await fetch(url + query, {
+              headers: {
+                accept: 'application/vnd.github.v3+json',
+                authorization: 'Bearer ' + process.env.GH_TOKEN,
+              },
+            });
+            const contentType = response.headers.get('content-type') || '';
+            const bytes = Buffer.from(await response.arrayBuffer());
+            let payload;
+            try { payload = JSON.parse(bytes.toString('utf8')); } catch {}
+            console.log(label + '_STATUS=' + response.status);
+            console.log(label + '_CONTENT_TYPE=' + JSON.stringify(contentType));
+            console.log(label + '_CONTENT_TYPE_CODEPOINTS=' +
+              Array.from(contentType, c => c.codePointAt(0).toString(16)).join(','));
+            console.log(label + '_BODY_BYTES=' + bytes.length);
+            console.log(label + '_BODY_SHA256=' + createHash('sha256').update(bytes).digest('hex'));
+            console.log(label + '_BODY_FULL_NAME=' + (payload?.full_name || ''));
+          }
           JS
