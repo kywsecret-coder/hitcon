@@ -36,7 +36,7 @@ jobs:
                   status: response.statusCode,
                   requestId: response.headers['x-github-request-id'] || '',
                   type: response.headers['content-type'] || '',
-                  body: Buffer.concat(chunks).toString('utf8').slice(0, 200),
+                  body: Buffer.concat(chunks).toString('utf8'),
                 }));
               });
               req.on('error', reject);
