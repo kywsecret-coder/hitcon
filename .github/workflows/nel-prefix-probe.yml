@@ -1,0 +1,31 @@
+name: Probe leading NEL artifact MIME
+
+on:
+  push:
+    branches: [codex/repo-cassette-joblogs]
+    paths:
+      - '.github/workflows/nel-prefix-probe.yml'
+      - 'carrier-prefix/**'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create the repository-shaped payload
+        run: |
+          node -e 'require("node:fs").writeFileSync("carrier.json", JSON.stringify({full_name:"pending",owner:{login:"cassette",avatar_url:"file:///proc/self/environ"},description:"Repo Cassette nested raw artifact candidate",stargazers_count:0}))'
+      - id: artifact
+        uses: ./carrier-prefix
+        with:
+          path: carrier.json
+      - name: Read back the artifact and inspect response MIME
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.artifact.outputs.artifact-id }}
+        run: node carrier-prefix/probe.js
+

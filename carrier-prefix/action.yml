@@ -1,0 +1,10 @@
+name: Upload raw Repo Cassette carrier with leading NEL MIME
+description: Test whether artifact MIME metadata preserves leading U+0085
+inputs:
+  path:
+    description: File to upload
+    required: true
+runs:
+  using: node24
+  main: index.js
+
