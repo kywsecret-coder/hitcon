@@ -16,4 +16,4 @@ jobs:
           node-version: "24"
       - run: npm install --ignore-scripts
       - name: Test trailing NEL in version 7 MIME metadata
-        run: node mime_suffix_probe.mjs
+        uses: ./.github/actions/mime-probe
