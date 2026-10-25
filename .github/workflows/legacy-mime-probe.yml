@@ -10,186 +10,76 @@ permissions:
   contents: read
 
 jobs:
-  probe:
+  upload:
     runs-on: ubuntu-latest
+    outputs:
+      artifact_ids: ${{ steps.upload.outputs.artifact_ids }}
     steps:
       - uses: actions/checkout@v4
-      - name: Test protocol versions 1 through 6
+      - id: upload
+        name: Upload versions 1 through 6
+        uses: ./legacy-mime-action
+  verify:
+    needs: upload
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check GitHub download headers and exact body bytes
         env:
-          GITHUB_TOKEN: \${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          ARTIFACT_IDS: ${{ needs.upload.outputs.artifact_ids }}
         run: |
           node --input-type=module <<'NODE'
           import https from 'node:https';
           import {createHash} from 'node:crypto';
-
-          const repo = process.env.GITHUB_REPOSITORY;
-          const runId = process.env.GITHUB_RUN_ID;
-          const token = process.env.ACTIONS_RUNTIME_TOKEN;
-          const scope = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString()).scp
-            .split(' ').find(value => value.startsWith('Actions.Results:'));
-          const fields = scope.split(':');
-          const runBackend = fields[1];
-          const jobBackend = fields[2];
-          const service = 'github.actions.results.api.v1.ArtifactService';
-          const runtimeUrl = new URL(process.env.ACTIONS_RESULTS_URL);
-          const apiHeaders = {
+          const repository = process.env.GITHUB_REPOSITORY;
+          const ids = JSON.parse(process.env.ARTIFACT_IDS || '[]');
+          const headers = {
             authorization: 'Bearer ' + process.env.GITHUB_TOKEN,
             accept: 'application/vnd.github.v3+json',
             'x-github-api-version': '2022-11-28',
-            'user-agent': 'repo-cassette-legacy-mime-probe',
+            'user-agent': 'repo-cassette-legacy-mime-verify',
           };
-          const blobType = 'application/json\u0085';
-
-          function request(url, method, headers, body) {
+          function request(url, method, requestHeaders) {
             return new Promise((resolve, reject) => {
               const target = new URL(url);
-              const req = https.request({
-                method,
-                hostname: target.hostname,
-                port: target.port || 443,
-                path: target.pathname + target.search,
-                headers,
-              }, response => {
+              const req = https.request({method, hostname: target.hostname, port: target.port || 443, path: target.pathname + target.search, headers: requestHeaders}, response => {
                 const chunks = [];
                 response.on('data', chunk => chunks.push(chunk));
-                response.on('end', () => resolve({
-                  status: response.statusCode,
-                  headers: response.headers,
-                  body: Buffer.concat(chunks),
-                }));
+                response.on('end', () => resolve({status: response.statusCode, headers: response.headers, body: Buffer.concat(chunks)}));
               });
               req.on('error', reject);
-              req.setTimeout(30000, () => req.destroy(new Error('timeout')));
-              if (body) req.write(body);
+              req.setTimeout(30000, () => req.destroy(new Error('request timeout')));
               req.end();
             });
           }
-
-          async function rpc(method, body) {
-            const response = await fetch(new URL('/twirp/' + service + '/' + method, runtimeUrl.origin), {
-              method: 'POST',
-              headers: {
-                authorization: 'Bearer ' + token,
-                'content-type': 'application/json',
-              },
-              body: JSON.stringify(body),
-            });
-            if (!response.ok) throw new Error('rpc-' + method + '-' + response.status);
-            return response.json();
+          async function remove(id) {
+            return request('https://api.github.com/repos/' + repository + '/actions/artifacts/' + id, 'DELETE', headers);
           }
-
-          async function uploadBlob(url, body) {
-            return request(url, 'PUT', {
-              'content-type': 'application/octet-stream',
-              'content-length': String(body.length),
-              'x-ms-blob-type': 'BlockBlob',
-              'x-ms-blob-content-type': blobType,
-              'x-ms-version': '2022-11-02',
-            }, body);
+          let viableId = null;
+          for (let i = 0; i < ids.length; i++) {
+            const id = ids[i];
+            const expectedObject = {
+              full_name: repository + '/actions/artifacts/' + id + '/zip',
+              owner: {login: 'cassette', avatar_url: 'file:///proc/self/environ'},
+              description: 'Repo Cassette legacy blob MIME discriminator',
+              stargazers_count: 0,
+            };
+            const expected = Buffer.from(JSON.stringify(expectedObject));
+            const api = await request('https://api.github.com/repos/' + repository + '/actions/artifacts/' + id + '/zip', 'GET', headers);
+            let final = api;
+            if (api.status === 302 && api.headers.location) final = await request(api.headers.location, 'GET', {});
+            const type = final.headers['content-type'] || '';
+            const nodeType = type.split(',', 1)[0].split(';', 1)[0].trim().toLowerCase();
+            const pythonType = type.split(',', 1)[0].split(';', 1)[0].replace(/^[\s\u0085]+|[\s\u0085]+$/g, '').toLowerCase();
+            const bodyMatch = final.body.equals(expected);
+            const viable = bodyMatch && nodeType === 'application/json\u0085' && pythonType === 'application/json';
+            console.log('LEGACY-MIME ' + JSON.stringify({version: i + 1, artifactId: id, apiStatus: api.status, finalStatus: final.status, contentTypeHex: Buffer.from(type, 'latin1').toString('hex'), nodeTypeHex: Buffer.from(nodeType, 'latin1').toString('hex'), bytes: final.body.length, bodyMatch, bodySha256: createHash('sha256').update(final.body).digest('hex'), viable}));
+            if (viable && !viableId) viableId = id;
           }
-
-          async function deleteArtifact(id) {
-            return request(
-              'https://api.github.com/repos/' + repo + '/actions/artifacts/' + id,
-              'DELETE',
-              apiHeaders,
-            );
+          for (const id of ids) {
+            if (id === viableId) continue;
+            const response = await remove(id);
+            console.log('CLEANUP ' + JSON.stringify({artifactId: id, status: response.status}));
           }
-
-          for (const version of [1, 2, 3, 4, 5, 6]) {
-            let artifactId = null;
-            try {
-              const name = 'legacy-v' + version + '-' + runId;
-              const created = await rpc('CreateArtifact', {
-                workflow_run_backend_id: runBackend,
-                workflow_job_run_backend_id: jobBackend,
-                name,
-                version,
-              });
-              const signedUrl = created.signed_upload_url || created.signedUploadUrl;
-              if (!created.ok || !signedUrl) throw new Error('create-rejected');
-
-              const object = {
-                full_name: 'placeholder/repository',
-                owner: {login: 'cassette', avatar_url: 'file:///proc/self/environ'},
-                description: 'Repo Cassette legacy blob MIME discriminator',
-                stargazers_count: 0,
-              };
-              const firstBody = Buffer.from(JSON.stringify(object));
-              const firstUpload = await uploadBlob(signedUrl, firstBody);
-              if (firstUpload.status < 200 || firstUpload.status >= 300) {
-                throw new Error('upload-' + firstUpload.status);
-              }
-
-              const digest = createHash('sha256').update(firstBody).digest('hex');
-              const finalized = await rpc('FinalizeArtifact', {
-                workflow_run_backend_id: runBackend,
-                workflow_job_run_backend_id: jobBackend,
-                name,
-                size: String(firstBody.length),
-                hash: 'sha256:' + digest,
-              });
-              artifactId = finalized.artifact_id || finalized.artifactId;
-              if (!finalized.ok || !artifactId) throw new Error('finalize-rejected');
-
-              const route = repo + '/actions/artifacts/' + artifactId + '/zip';
-              object.full_name = route;
-              const finalBody = Buffer.from(JSON.stringify(object));
-              const finalUpload = await uploadBlob(signedUrl, finalBody);
-              if (finalUpload.status < 200 || finalUpload.status >= 300) {
-                throw new Error('overwrite-' + finalUpload.status);
-              }
-
-              const api = await request(
-                'https://api.github.com/repos/' + repo + '/actions/artifacts/' + artifactId + '/zip',
-                'GET',
-                apiHeaders,
-              );
-              let final = api;
-              if (api.status === 302 && api.headers.location) {
-                final = await request(api.headers.location, 'GET', {});
-              }
-              const type = final.headers['content-type'] || '';
-              const nodeType = type.split(',', 1)[0].split(';', 1)[0].trim().toLowerCase();
-              const pythonType = type.split(',', 1)[0].split(';', 1)[0].replace(/^[\s\u0085]+|[\s\u0085]+$/g, '').toLowerCase();
-              const bodyMatch = final.body.equals(finalBody);
-              const viable = bodyMatch && nodeType === 'application/json\u0085' &&
-                pythonType === 'application/json';
-              console.log('LEGACY-MIME ' + JSON.stringify({
-                version,
-                artifactId,
-                apiStatus: api.status,
-                finalStatus: final.status,
-                contentTypeHex: Buffer.from(type, 'latin1').toString('hex'),
-                nodeTypeHex: Buffer.from(nodeType, 'latin1').toString('hex'),
-                bodyBytes: final.body.length,
-                bodyMatch,
-                viable,
-              }));
-
-              if (viable) {
-                console.log('VIABLE_ARTIFACT_ID=' + artifactId);
-                break;
-              }
-              const deleted = await deleteArtifact(artifactId);
-              console.log('CLEANUP ' + JSON.stringify({
-                artifactId,
-                deleteStatus: deleted.status,
-              }));
-              artifactId = null;
-            } catch (error) {
-              console.log('LEGACY-MIME-ERROR ' + JSON.stringify({
-                version,
-                error: error.name || 'Error',
-                code: error.message.split('-').slice(-1)[0].slice(0, 32),
-              }));
-              if (artifactId) {
-                const deleted = await deleteArtifact(artifactId).catch(() => null);
-                console.log('CLEANUP ' + JSON.stringify({
-                  artifactId,
-                  deleteStatus: deleted && deleted.status,
-                }));
-              }
-            }
-          }
+          console.log('VIABLE_ARTIFACT_ID=' + (viableId || 'none'));
           NODE

@@ -1,0 +1,5 @@
+name: Legacy artifact MIME probe
+description: Uploads v1-v6 artifacts with a controlled Azure blob Content-Type
+runs:
+  using: node20
+  main: index.js
