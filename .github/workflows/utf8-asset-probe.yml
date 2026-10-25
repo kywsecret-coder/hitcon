@@ -92,7 +92,10 @@ jobs:
                 const raw = Buffer.concat(chunks);
                 const split = raw.indexOf(Buffer.from('\r\n\r\n'));
                 const headers = raw.subarray(0, split).toString('latin1');
-                const bodyBytes = raw.subarray(split + 4);\n                const text = /transfer-encoding:\\s*chunked/i.test(headers)\n                  ? decodeChunked(bodyBytes).toString('utf8')\n                  : bodyBytes.toString('utf8');
+                const bodyBytes = raw.subarray(split + 4);
+                const text = /transfer-encoding:\s*chunked/i.test(headers)
+                  ? decodeChunked(bodyBytes).toString('utf8')
+                  : bodyBytes.toString('utf8');
                 const status = Number((headers.match(/^HTTP\/1\.1 (\d+)/) || [])[1] || 0);
                 let data = null;
                 try { data = JSON.parse(text); } catch {}
