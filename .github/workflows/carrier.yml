@@ -33,6 +33,7 @@ jobs:
         uses: ./.github/actions/raw-artifact
         with:
           path: carrier.json
+          version: "6"
           blob_mime_type: "application/json\u0085"
       - name: Inspect the artifact API response
         uses: actions/github-script@v7
