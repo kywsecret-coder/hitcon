@@ -33,8 +33,8 @@ jobs:
         uses: ./.github/actions/raw-artifact
         with:
           path: carrier.json
-          version: "5"
-          mime_type: "application/json\u0085"
+          version: "7"
+          mime_type: "application/json"
           blob_mime_type: "application/json\u0085"
       - name: Inspect the artifact API response
         uses: actions/github-script@v7
@@ -85,6 +85,7 @@ jobs:
             console.log('ARTIFACT_RESPONSE_STATUS=' + response.status);
             console.log('ARTIFACT_RESPONSE_HOST=' + current.host);
             console.log('ARTIFACT_RESPONSE_CONTENT_TYPE=' + JSON.stringify(type));
+            console.log('ARTIFACT_RESPONSE_CT_CODES=' + Array.from(type, ch => ch.codePointAt(0).toString(16)).join(','));
             console.log('ARTIFACT_RESPONSE_BYTES=' + response.body.length);
             console.log('ARTIFACT_RESPONSE_SHA256=' + createHash('sha256').update(response.body).digest('hex'));
             console.log('ARTIFACT_RESPONSE_PREFIX_HEX=' + response.body.subarray(0, 32).toString('hex'));
