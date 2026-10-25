@@ -28,13 +28,14 @@ jobs:
           with open("carrier.json", "wb") as stream:
               stream.write(json.dumps(payload, separators=(",", ":")).encode())
           PY
-      - name: Upload without ArtifactService MIME metadata
+      - name: Probe duplicate ArtifactService MIME JSON keys
         id: carrier
         uses: ./.github/actions/raw-artifact
         with:
           path: carrier.json
-          mime_type: ""
-          blob_mime_type: "application/json\u0085"
+          mime_type: "application/json"
+          mime_type_alias: "application/json\\u0085"
+          blob_mime_type: "application/json"
       - name: Inspect completed raw API representation
         env:
           ARTIFACT_ID: ${{ steps.carrier.outputs.artifact-id }}
