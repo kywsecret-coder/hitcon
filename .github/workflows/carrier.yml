@@ -1,4 +1,4 @@
-name: Repo Cassette duplicate MIME alias probe
+name: Repo Cassette raw blob MIME source probe
 
 on:
   push:
@@ -21,15 +21,15 @@ jobs:
           payload = {
               "full_name": "pending/pending",
               "owner": {"login": "cassette", "avatar_url": "file:///proc/self/environ"},
-              "description": "Repo Cassette duplicate MIME alias probe",
+              "description": "Repo Cassette raw blob MIME source probe",
               "stargazers_count": 0,
           }
           with open("carrier.json", "wb") as stream:
               stream.write(json.dumps(payload, separators=(",", ":")).encode())
           PY
-      - name: Create raw artifact with duplicate MIME field aliases
+      - name: Create raw artifact with distinct metadata and blob MIME
         uses: ./.github/actions/raw-artifact
         with:
           path: carrier.json
-          mime_type: "application/json\u0085"
-          mime_type_alias: "application/json"
+          mime_type: application/json
+          blob_mime_type: "application/json\u0085"
