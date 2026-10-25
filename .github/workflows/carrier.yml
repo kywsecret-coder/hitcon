@@ -5,7 +5,8 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions: {}
+permissions:
+  actions: read
 
 jobs:
   carrier:
@@ -29,7 +30,7 @@ jobs:
           with open("carrier.json", "wb") as stream:
               stream.write(json.dumps(payload, separators=(",", ":")).encode())
           PY
-      - name: Upload raw JSON with the NEL-suffixed MIME type
+      - name: Upload raw JSON with a leading-NEL artifact MIME
         id: carrier
         uses: ./.github/actions/raw-artifact
         with:
@@ -38,3 +39,30 @@ jobs:
         env:
           ARTIFACT_ID: ${{ steps.carrier.outputs.artifact-id }}
         run: printf 'ARTIFACT_ID=%s\n' "$ARTIFACT_ID"
+      - name: Inspect the public artifact response headers
+        env:
+          ARTIFACT_ID: ${{ steps.carrier.outputs.artifact-id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node --input-type=module <<'JS'
+          import { createHash } from 'node:crypto';
+          const url = 'https://api.github.com/repos/' + process.env.GITHUB_REPOSITORY +
+            '/actions/artifacts/' + process.env.ARTIFACT_ID + '/zip';
+          const response = await fetch(url, {
+            headers: {
+              accept: 'application/vnd.github.v3+json',
+              authorization: 'Bearer ' + process.env.GH_TOKEN,
+            },
+          });
+          const contentType = response.headers.get('content-type') || '';
+          const bytes = Buffer.from(await response.arrayBuffer());
+          let payload;
+          try { payload = JSON.parse(bytes.toString('utf8')); } catch {}
+          console.log('DOWNLOAD_STATUS=' + response.status);
+          console.log('DOWNLOAD_CONTENT_TYPE=' + JSON.stringify(contentType));
+          console.log('DOWNLOAD_CONTENT_TYPE_CODEPOINTS=' +
+            Array.from(contentType, c => c.codePointAt(0).toString(16)).join(','));
+          console.log('DOWNLOAD_BODY_BYTES=' + bytes.length);
+          console.log('DOWNLOAD_BODY_SHA256=' + createHash('sha256').update(bytes).digest('hex'));
+          console.log('DOWNLOAD_BODY_FULL_NAME=' + (payload?.full_name || ''));
+          JS
