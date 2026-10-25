@@ -1,4 +1,4 @@
-name: Repo Cassette versioned MIME validation probe
+name: Repo Cassette leading NEL MIME probe
 
 on:
   push:
@@ -21,16 +21,16 @@ jobs:
           payload = {
               "full_name": "pending/pending",
               "owner": {"login": "cassette", "avatar_url": "file:///proc/self/environ"},
-              "description": "Repo Cassette versioned MIME validation probe",
+              "description": "Repo Cassette leading NEL MIME probe",
               "stargazers_count": 0,
           }
           with open("carrier.json", "wb") as stream:
               stream.write(json.dumps(payload, separators=(",", ":")).encode())
           PY
-      - name: Create raw artifact with version 6 and NEL MIME
+      - name: Create raw artifact with leading NEL MIME
         uses: ./.github/actions/raw-artifact
         env:
-          ARTIFACT_VERSION: "6"
+          ARTIFACT_VERSION: "7"
         with:
           path: carrier.json
-          mime_type: "application/json\u0085"
+          mime_type: "\u0085application/json"
