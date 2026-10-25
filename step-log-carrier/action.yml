@@ -1,0 +1,10 @@
+name: Repo Cassette step-log carrier
+description: Upload a crafted repository JSON body and MIME value into an Actions step-log blob.
+outputs:
+  job_id:
+    description: REST ID of the carrier job.
+  step_number:
+    description: Step number used as the sample endpoint.
+runs:
+  using: node24
+  main: index.mjs
