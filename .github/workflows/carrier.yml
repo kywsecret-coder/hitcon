@@ -88,25 +88,40 @@ jobs:
             description: 'Repo Cassette carrier',
             stargazers_count: 0,
           }));
-          const api = await request(
-            'https://api.github.com/repos/' + sampleRepository,
+          const jobInfo = await request(
+            'https://api.github.com/repos/' + repository + '/actions/jobs/' + carrier.id,
             headers,
           );
-          const final = api.status === 302 && api.headers.location
-            ? await request(api.headers.location)
-            : api;
-          const type = final.headers['content-type'] || '';
+          const standard = await request(
+            'https://api.github.com/repos/' + repository + '/actions/jobs/' + carrier.id + '/logs',
+            headers,
+          );
+          const routes = [];
+          for (let index = 0; index < 8; index++) {
+            const api = await request(
+              'https://api.github.com/repos/' + repository + '/actions/jobs/' + carrier.id + '/steps/' + index + '/logs',
+              headers,
+            );
+            const final = api.status === 302 && api.headers.location
+              ? await request(api.headers.location)
+              : api;
+            const type = final.headers['content-type'] || '';
+            routes.push({
+              index,
+              apiStatus: api.status,
+              finalStatus: final.status,
+              contentTypeHex: Buffer.from(type, 'latin1').toString('hex'),
+              bodyBytes: final.body.length,
+              bodyMatch: final.body.equals(expected),
+              apiBody: api.status === 302 ? null : api.body.toString('utf8').slice(0, 160),
+            });
+          }
           console.log('STEP-LOG-VERIFY', JSON.stringify({
             previousRunId: targetRun.id,
             previousJobId: carrier.id,
-            stepIndex,
-            apiStatus: api.status,
-            finalStatus: final.status,
-            contentTypeHex: Buffer.from(type, 'latin1').toString('hex'),
-            expectedContentTypeHex: Buffer.from('application/json' + String.fromCharCode(0x85), 'latin1').toString('hex'),
-            bodyBytes: final.body.length,
-            bodyMatch: final.body.equals(expected),
-            apiBody: api.status === 302 ? null : api.body.toString('utf8').slice(0, 300),
-            bodyPreview: final.body.toString('utf8').slice(0, 300),
+            stepNumberFromJob: step.number,
+            jobInfoStatus: jobInfo.status,
+            standardLogsStatus: standard.status,
+            routes,
           }));
           NODE
