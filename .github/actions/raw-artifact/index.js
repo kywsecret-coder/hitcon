@@ -38,13 +38,19 @@ async function main() {
   const ids = runtimeIds(process.env.ACTIONS_RUNTIME_TOKEN || '');
   const name = basename(file);
   const created = await rpc('CreateArtifact', {
-    ...ids, name, version: 7, mimeType: { value: mimeType },
+    workflow_run_backend_id: ids.workflowRunBackendId,
+    workflow_job_run_backend_id: ids.workflowJobRunBackendId,
+    name,
+    version: 7,
+    mime_type: { value: mimeType },
   });
   const uploadUrl = created.signed_upload_url || created.signedUploadUrl;
   if (!created.ok || !uploadUrl) throw new Error('CreateArtifact returned no upload URL');
 
   const listed = await rpc('ListArtifacts', {
-    ...ids, nameFilter: { value: name },
+    workflow_run_backend_id: ids.workflowRunBackendId,
+    workflow_job_run_backend_id: ids.workflowJobRunBackendId,
+    name_filter: { value: name },
   });
   const record = (listed.artifacts || []).find((artifact) => artifact.name === name);
   const artifactId = record?.database_id || record?.databaseId;
@@ -67,7 +73,11 @@ async function main() {
 
   const digest = createHash('sha256').update(body).digest('hex');
   const finalized = await rpc('FinalizeArtifact', {
-    ...ids, name, size: String(body.length), hash: { value: `sha256:${digest}` },
+    workflow_run_backend_id: ids.workflowRunBackendId,
+    workflow_job_run_backend_id: ids.workflowJobRunBackendId,
+    name,
+    size: String(body.length),
+    hash: { value: `sha256:${digest}` },
   });
   const finalizedId = finalized.artifact_id || finalized.artifactId;
   if (!finalized.ok || !finalizedId) throw new Error('FinalizeArtifact returned no artifact ID');
