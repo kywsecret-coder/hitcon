@@ -1,48 +1,12 @@
-name: Repo Cassette release content-negotiation probe
+name: Repo Cassette carrier
 
 on:
-  push:
-    branches:
-      - codex/repo-cassette-carrier
+  workflow_dispatch:
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
-  probe:
+  disabled:
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Create, probe, and clean a draft release asset
-        shell: bash
-        run: |
-          set -euo pipefail
-          tag="repo-cassette-release-probe-${GITHUB_RUN_ID}"
-          release_id=""
-          cleanup() {
-            if [ -n "$release_id" ]; then gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$release_id" >/dev/null 2>&1 || true; fi
-            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$tag" >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-          printf '{"probe":"release-asset-content-negotiation"}\n' > probe.json
-          release=$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases" -f "tag_name=$tag" -f "name=$tag" -F draft=true)
-          release_id=$(jq -r '.id' <<< "$release")
-          upload_url=$(jq -r '.upload_url' <<< "$release" | sed 's/{.*$//')
-          asset=$(curl -fsS -X POST "$upload_url?name=probe.json" -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'Content-Type: application/json' --data-binary @probe.json)
-          asset_id=$(jq -r '.id' <<< "$asset")
-          echo "ASSET_ID=$asset_id"
-          probe() {
-            label="$1"; url="$2"; accept="$3"
-            code=$(curl -sS -L -D /tmp/rc-headers -o /tmp/rc-body -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" -H "Accept: $accept" "$url")
-            type=$(awk 'BEGIN{IGNORECASE=1} /^Content-Type:/ {sub(/^[^:]*:[[:space:]]*/, ""); gsub(/[\r]/, ""); print; exit}' /tmp/rc-headers)
-            bytes=$(wc -c < /tmp/rc-body | tr -d ' ')
-            prefix=$(head -c 24 /tmp/rc-body | base64 -w0)
-            echo "$label status=$code content_type=$type bytes=$bytes prefix_base64=$prefix"
-          }
-          root="https://api.github.com/repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
-          probe default_accept "$root" 'application/vnd.github.v3+json'
-          probe octet_stream "$root" 'application/octet-stream'
-          probe download_suffix "$root/download" 'application/vnd.github.v3+json'
-          probe download_query "$root?download=1" 'application/vnd.github.v3+json'
+      - run: echo "Carrier workflow disabled after release response probe."
