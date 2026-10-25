@@ -78,26 +78,5 @@ jobs:
             console.log(label + '_BODY_SHA256=' + createHash('sha256').update(bytes).digest('hex'));
             console.log(label + '_BODY_FULL_NAME=' + (payload?.full_name || ''));
           }
-          const releaseRoutes = [
-            ['release_asset', 'https://api.github.com/repos/neovim/neovim/releases/assets/625399210'],
-            ['release_asset_raw', 'https://api.github.com/repos/neovim/neovim/releases/assets/625399210?raw=1'],
-            ['release_asset_download', 'https://api.github.com/repos/neovim/neovim/releases/assets/625399210?download=1'],
-            ['release_asset_named', 'https://api.github.com/repos/neovim/neovim/releases/download/v0.12.6/nvim-linux-arm64.appimage'],
-          ];
-          for (const [label, url] of releaseRoutes) {
-            const response = await fetch(url, {
-              headers: { accept: 'application/vnd.github.v3+json' },
-            });
-            const contentType = response.headers.get('content-type') || '';
-            const length = response.headers.get('content-length') || '';
-            const reader = response.body?.getReader();
-            const first = reader ? await reader.read() : { value: new Uint8Array() };
-            const prefix = Buffer.from(first.value || []).subarray(0, 16);
-            if (reader) await reader.cancel();
-            console.log(label + '_STATUS=' + response.status);
-            console.log(label + '_CONTENT_TYPE=' + JSON.stringify(contentType));
-            console.log(label + '_LENGTH=' + length);
-            console.log(label + '_PREFIX_HEX=' + prefix.toString('hex'));
-          }
           JS
 
