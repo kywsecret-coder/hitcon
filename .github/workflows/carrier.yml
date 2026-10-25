@@ -1,6 +1,9 @@
-name: Repo Cassette carrier setup
+name: Build Repo Cassette race artifacts
 
 on:
+  push:
+    branches:
+      - codex/repo-cassette-release-routes
   workflow_dispatch:
 
 permissions:
@@ -8,7 +11,12 @@ permissions:
   contents: read
 
 jobs:
-  idle:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Carrier setup only"
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - run: npm install --ignore-scripts
+      - uses: ./artifact-action
