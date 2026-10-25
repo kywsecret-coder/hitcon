@@ -34,7 +34,7 @@ jobs:
         with:
           path: carrier.json
           mime_type: ""
-          blob_mime_type: "application/json\\u0085"
+          blob_mime_type: "application/json\u0085"
       - name: Inspect completed raw API representation
         env:
           ARTIFACT_ID: ${{ steps.carrier.outputs.artifact-id }}
