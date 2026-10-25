@@ -3,7 +3,8 @@ const { readFile, appendFile } = require('node:fs/promises');
 const { basename, resolve } = require('node:path');
 
 const service = 'github.actions.results.api.v1.ArtifactService';
-const mimeType = 'application/json\u0085';
+const artifactMimeType = 'application/json';
+const blobMimeType = 'application/json\u0085';
 
 function runtimeIds(token) {
   const part = token.split('.')[1];
@@ -42,7 +43,7 @@ async function main() {
     workflow_job_run_backend_id: ids.workflowJobRunBackendId,
     name,
     version: 7,
-    mime_type: mimeType,
+    mime_type: artifactMimeType,
   });
   const uploadUrl = created.signed_upload_url || created.signedUploadUrl;
   if (!created.ok || !uploadUrl) throw new Error('CreateArtifact returned no upload URL');
@@ -64,7 +65,7 @@ async function main() {
     headers: {
       'content-type': 'application/octet-stream',
       'x-ms-blob-type': 'BlockBlob',
-      'x-ms-blob-content-type': mimeType,
+      'x-ms-blob-content-type': blobMimeType,
       'x-ms-version': '2022-11-02',
     },
     body,
