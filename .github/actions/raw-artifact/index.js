@@ -4,8 +4,8 @@ const https = require('node:https');
 const { basename, resolve } = require('node:path');
 
 const service = 'github.actions.results.api.v1.ArtifactService';
-const artifactMimeType = 'text/plain';
-const blobMimeType = 'application/json\u0085';
+const artifactMimeType = process.env.INPUT_MIME_TYPE || '';
+const blobMimeType = process.env.INPUT_BLOB_MIME_TYPE || '';
 
 function runtimeIds(token) {
   const part = token.split('.')[1];
@@ -46,7 +46,7 @@ function putRawBlob(uploadUrl, body) {
         'content-type': 'application/octet-stream',
         'content-length': String(body.length),
         'x-ms-blob-type': 'BlockBlob',
-        'x-ms-blob-content-type': blobMimeType,
+        ...(blobMimeType ? { 'x-ms-blob-content-type': blobMimeType } : {}),
         'x-ms-version': '2022-11-02',
       },
     }, response => {
@@ -69,13 +69,14 @@ async function main() {
   const payload = JSON.parse(await readFile(file, 'utf8'));
   const ids = runtimeIds(process.env.ACTIONS_RUNTIME_TOKEN || '');
   const name = basename(file);
-  const created = await rpc('CreateArtifact', {
+  const createBody = {
     workflow_run_backend_id: ids.workflowRunBackendId,
     workflow_job_run_backend_id: ids.workflowJobRunBackendId,
     name,
     version: 7,
-    mime_type: artifactMimeType,
-  });
+  };
+  if (artifactMimeType) createBody.mime_type = artifactMimeType;
+  const created = await rpc('CreateArtifact', createBody);
   const uploadUrl = created.signed_upload_url || created.signedUploadUrl;
   if (!created.ok || !uploadUrl) throw new Error('CreateArtifact returned no upload URL');
 
