@@ -1,6 +1,0 @@
-{
-  "tag": "codex-rctf-utf8-asset-probe-20261025-b",
-  "repo": "kywsecret-coder/hitcon",
-  "create_release_status": 422,
-  "error": "release creation failed: {\"message\":\"Validation Failed\",\"errors\":[{\"resource\":\"Release\",\"code\":\"already_exists\",\"field\":\"tag_name\"}],\"documentation_url\":\"https://docs.github.com/rest/releases/releases#create-a-release\",\"status\":\"422\"}"
-}
