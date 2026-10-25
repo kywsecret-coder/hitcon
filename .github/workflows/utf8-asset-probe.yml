@@ -1,0 +1,161 @@
+name: Repo Cassette UTF-8 asset header probe
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/utf8-asset-probe.yml
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Upload UTF-8 encoded NEL header and record response behavior
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          node <<'NODE'
+          const tls = require('node:tls');
+          const { URL } = require('node:url');
+
+          const repo = process.env.GITHUB_REPOSITORY;
+          const token = process.env.GH_TOKEN;
+          const tag = 'codex-rctf-utf8-asset-probe-20261025';
+          let release = null;
+          let asset = null;
+          const result = { tag, repo };
+
+          async function api(path, method = 'GET', body, accept = 'application/vnd.github+json') {
+            const response = await fetch('https://api.github.com' + path, {
+              method,
+              headers: {
+                authorization: 'Bearer ' + token,
+                accept,
+                'x-github-api-version': '2022-11-28',
+                'user-agent': 'repo-cassette-probe',
+                ...(body ? { 'content-type': 'application/json' } : {}),
+              },
+              ...(body ? { body: JSON.stringify(body) } : {}),
+            });
+            const text = await response.text();
+            let data = null;
+            try { data = JSON.parse(text); } catch {}
+            return { response, text, data };
+          }
+
+          function codepoints(value) {
+            return Array.from(value || '', ch => 'U+' + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0'));
+          }
+
+          function upload(uploadUrl, body) {
+            const url = new URL(uploadUrl);
+            return new Promise((resolve, reject) => {
+              const socket = tls.connect({ host: url.hostname, port: 443, servername: url.hostname }, () => {
+                const header = Buffer.concat([
+                  Buffer.from('PUT ' + url.pathname + url.search + ' HTTP/1.1\r\n', 'latin1'),
+                  Buffer.from('Host: ' + url.host + '\r\nAuthorization: Bearer ' + token + '\r\n', 'latin1'),
+                  Buffer.from('Accept: application/vnd.github+json\r\nContent-Type: application/json', 'latin1'),
+                  Buffer.from([0xC2, 0x85]),
+                  Buffer.from('\r\nContent-Length: ' + body.length + '\r\nConnection: close\r\n\r\n', 'latin1'),
+                  body,
+                ]);
+                socket.write(header);
+              });
+              const chunks = [];
+              socket.on('data', chunk => chunks.push(chunk));
+              socket.on('error', reject);
+              socket.on('end', () => {
+                const raw = Buffer.concat(chunks);
+                const split = raw.indexOf(Buffer.from('\r\n\r\n'));
+                const headers = raw.subarray(0, split).toString('latin1');
+                const text = raw.subarray(split + 4).toString('utf8');
+                const status = Number((headers.match(/^HTTP\/1\.1 (\d+)/) || [])[1] || 0);
+                let data = null;
+                try { data = JSON.parse(text); } catch {}
+                resolve({ status, headers, text, data });
+              });
+            });
+          }
+
+          try {
+            const created = await api('/repos/' + repo + '/releases', 'POST', {
+              tag_name: tag, name: tag, prerelease: true, draft: false,
+            });
+            result.create_release_status = created.response.status;
+            if (!created.response.ok) throw new Error('release creation failed: ' + created.text.slice(0, 300));
+            release = created.data;
+            const uploadUrl = release.upload_url.split('{')[0] + '?name=repo-cassette-utf8.json';
+            const body = Buffer.from(JSON.stringify({
+              full_name: repo + '/release-assets/probe',
+              owner: { login: 'probe', avatar_url: 'http://127.0.0.1/file' },
+              description: 'UTF-8 header probe only',
+              stargazers_count: 0,
+            }));
+            const uploaded = await upload(uploadUrl, body);
+            result.upload_status = uploaded.status;
+            if (!uploaded.data || !uploaded.data.id) throw new Error('asset upload failed: ' + uploaded.text.slice(0, 300));
+            asset = uploaded.data;
+            result.asset_id = asset.id;
+            result.upload_metadata_content_type = asset.content_type;
+            result.upload_metadata_content_type_codepoints = codepoints(asset.content_type);
+
+            const metadata = await api('/repos/' + repo + '/releases/assets/' + asset.id);
+            result.metadata_status = metadata.response.status;
+            result.metadata_content_type = metadata.data && metadata.data.content_type;
+            result.metadata_content_type_codepoints = codepoints(result.metadata_content_type);
+
+            const apiDownload = await fetch('https://api.github.com/repos/' + repo + '/releases/assets/' + asset.id, {
+              headers: {
+                authorization: 'Bearer ' + token,
+                accept: 'application/octet-stream',
+                'x-github-api-version': '2022-11-28',
+                'user-agent': 'repo-cassette-probe',
+              },
+              redirect: 'follow',
+            });
+            const apiBytes = Buffer.from(await apiDownload.arrayBuffer());
+            result.api_download_status = apiDownload.status;
+            result.api_download_content_type = apiDownload.headers.get('content-type');
+            result.api_download_content_type_codepoints = codepoints(result.api_download_content_type);
+            result.api_download_final_host = new URL(apiDownload.url).host;
+            result.api_download_matches = apiBytes.equals(body);
+
+            const browserDownload = await fetch(asset.browser_download_url, { redirect: 'follow' });
+            const browserBytes = Buffer.from(await browserDownload.arrayBuffer());
+            result.browser_download_status = browserDownload.status;
+            result.browser_download_content_type = browserDownload.headers.get('content-type');
+            result.browser_download_content_type_codepoints = codepoints(result.browser_download_content_type);
+            result.browser_download_final_host = new URL(browserDownload.url).host;
+            result.browser_download_matches = browserBytes.equals(body);
+          } catch (e) {
+            result.error = String(e.message || e);
+          } finally {
+            if (release && release.id) {
+              const deleted = await api('/repos/' + repo + '/releases/' + release.id, 'DELETE');
+              result.cleanup_release_status = deleted.response.status;
+            }
+            if (release) {
+              const deletedTag = await api('/repos/' + repo + '/git/refs/tags/' + encodeURIComponent(tag), 'DELETE');
+              result.cleanup_tag_status = deletedTag.response.status;
+            }
+          }
+
+          const path = '/repos/' + repo + '/contents/utf8-release-probe-result.json';
+          const saved = await api(path, 'PUT', {
+            message: 'record temporary Repo Cassette UTF-8 header probe',
+            branch: process.env.GITHUB_REF_NAME,
+            content: Buffer.from(JSON.stringify(result, null, 2)).toString('base64'),
+          });
+          result.result_commit_status = saved.response.status;
+          result.result_commit_sha = saved.data && saved.data.commit && saved.data.commit.sha;
+          if (!saved.response.ok) {
+            console.error('result write failed: ' + saved.text.slice(0, 300));
+            process.exitCode = 1;
+          }
+          console.log(JSON.stringify(result));
+          NODE
