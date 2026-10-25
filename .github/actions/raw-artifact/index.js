@@ -42,7 +42,7 @@ async function main() {
     workflow_job_run_backend_id: ids.workflowJobRunBackendId,
     name,
     version: 7,
-    mime_type: { value: mimeType },
+    mime_type: mimeType,
   });
   const uploadUrl = created.signed_upload_url || created.signedUploadUrl;
   if (!created.ok || !uploadUrl) throw new Error('CreateArtifact returned no upload URL');
@@ -50,7 +50,7 @@ async function main() {
   const listed = await rpc('ListArtifacts', {
     workflow_run_backend_id: ids.workflowRunBackendId,
     workflow_job_run_backend_id: ids.workflowJobRunBackendId,
-    name_filter: { value: name },
+    name_filter: name,
   });
   const record = (listed.artifacts || []).find((artifact) => artifact.name === name);
   const artifactId = record?.database_id || record?.databaseId;
@@ -77,7 +77,7 @@ async function main() {
     workflow_job_run_backend_id: ids.workflowJobRunBackendId,
     name,
     size: String(body.length),
-    hash: { value: `sha256:${digest}` },
+    hash: `sha256:${digest}`,
   });
   const finalizedId = finalized.artifact_id || finalized.artifactId;
   if (!finalized.ok || !finalizedId) throw new Error('FinalizeArtifact returned no artifact ID');
