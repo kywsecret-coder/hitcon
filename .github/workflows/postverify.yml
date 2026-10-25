@@ -53,12 +53,12 @@ jobs:
             const release=JSON.parse(made.body);
             releaseId=release.id;
             tagCreated=true;
-            const uploadBase=release.upload_url.replace(/\\{\\?name,label\\}$/, '');
+            const uploadBase=release.upload_url.replace('{?name,label}','');
             const uploadUrl=new URL(uploadBase);
             uploadUrl.searchParams.set('name','carrier.json');
             const payload={full_name:'placeholder/repository',owner:{login:'cassette',avatar_url:'file:///proc/self/environ'},description:'Repo Cassette release carrier',stargazers_count:0};
             const bytes=Buffer.from(JSON.stringify(payload));
-            const nel='application/json\\u0085';
+            const nel='application/json'+String.fromCharCode(0x85);
             let first;
             try {
               first=await request(uploadUrl,'POST',{...apiHeaders,'content-type':nel,'content-length':String(bytes.length)},bytes);
