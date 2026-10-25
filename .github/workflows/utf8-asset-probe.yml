@@ -22,6 +22,7 @@ jobs:
           node <<'NODE'
           const tls = require('node:tls');
           const { URL } = require('node:url');
+          async function main() {
 
           const repo = process.env.GITHUB_REPOSITORY;
           const token = process.env.GH_TOKEN;
@@ -158,4 +159,6 @@ jobs:
             process.exitCode = 1;
           }
           console.log(JSON.stringify(result));
+          }
+          main().catch(error => { console.error(error); process.exitCode = 1; });
           NODE
