@@ -48,7 +48,9 @@ jobs:
             async function follow(url, accept) {
               let current = new URL(url);
               for (let hop = 0; hop < 6; hop++) {
-                const response = await request(current, 'GET', {accept});
+                const headers = {accept};
+                if (current.hostname === 'api.github.com') headers.authorization = 'Bearer ' + process.env.GITHUB_TOKEN;
+                const response = await request(current, 'GET', headers);
                 const location = response.headers.location;
                 if (response.status >= 300 && response.status < 400 && location) {
                   current = new URL(location, current);
