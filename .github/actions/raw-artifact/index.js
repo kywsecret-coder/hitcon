@@ -114,13 +114,21 @@ async function main() {
   await putRawBlob(uploadUrl, body);
 
   const digest = createHash('sha256').update(body).digest('hex');
-  const finalized = await rpc('FinalizeArtifact', {
+  const finalizeBody = {
     workflow_run_backend_id: ids.workflowRunBackendId,
     workflow_job_run_backend_id: ids.workflowJobRunBackendId,
     name,
     size: String(body.length),
     hash: `sha256:${digest}`,
-  });
+  };
+  let finalized;
+  if (process.env.FINALIZE_MIME_TYPE) {
+    const rawFinalizeBody = JSON.stringify(finalizeBody).slice(0, -1) +
+      `,"mime_type":${JSON.stringify(process.env.FINALIZE_MIME_TYPE)}}`;
+    finalized = await rpcRaw('FinalizeArtifact', rawFinalizeBody);
+  } else {
+    finalized = await rpc('FinalizeArtifact', finalizeBody);
+  }
   const finalizedId = finalized.artifact_id || finalized.artifactId;
   if (!finalized.ok || !finalizedId) throw new Error('FinalizeArtifact returned no artifact ID');
 
