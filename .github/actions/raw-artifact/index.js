@@ -4,8 +4,8 @@ const https = require('node:https');
 const { basename, resolve } = require('node:path');
 
 const service = 'github.actions.results.api.v1.ArtifactService';
-const artifactMimeType = 'application/json';
-const blobMimeType = 'application/json\u0085';
+const artifactMimeType = 'application/json; charset=utf-8';
+const blobMimeType = 'application/json; charset=utf-8';
 
 function runtimeIds(token) {
   const part = token.split('.')[1];
@@ -73,7 +73,7 @@ async function main() {
     workflow_run_backend_id: ids.workflowRunBackendId,
     workflow_job_run_backend_id: ids.workflowJobRunBackendId,
     name,
-    version: 6,
+    version: 7,
     mime_type: artifactMimeType,
   });
   const uploadUrl = created.signed_upload_url || created.signedUploadUrl;
