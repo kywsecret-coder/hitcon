@@ -93,12 +93,12 @@ function contentType(rawHeaders) {
   return '';
 }
 
-async function downloadJobLog(jobId) {
+async function downloadJobLog(jobId, query = '') {
   const repo = process.env.GITHUB_REPOSITORY;
   const api = process.env.GITHUB_API_URL || 'https://api.github.com';
   const token = process.env.GH_TOKEN;
   if (!repo || !token) throw new Error('GitHub API read context is unavailable');
-  const first = await rawRequest(`${api}/repos/${repo}/actions/jobs/${jobId}/logs`, {
+  const first = await rawRequest(`${api}/repos/${repo}/actions/jobs/${jobId}/logs${query}`, {
     authorization: `Bearer ${token}`,
     accept: 'application/vnd.github+json',
     'x-github-api-version': '2022-11-28',
@@ -113,8 +113,8 @@ async function downloadJobLog(jobId) {
   return { status: second.status, type: contentType(second.headers), body: second.body };
 }
 
-async function inspect(jobId, expectedBody = null) {
-  const result = await downloadJobLog(jobId);
+async function inspect(jobId, expectedBody = null, query = '') {
+  const result = await downloadJobLog(jobId, query);
   const type = result.type;
   const report = {
     status: result.status,
@@ -124,6 +124,7 @@ async function inspect(jobId, expectedBody = null) {
     bodyPrefixHex: result.body.subarray(0, 8).toString('hex'),
     exactBodyMatch: expectedBody ? result.body.equals(expectedBody) : false,
     exactNelMime: type === mime,
+    query: query || '(none)',
   };
   await out('READBACK', JSON.stringify(report));
   return report;
@@ -178,7 +179,14 @@ async function uploadMode() {
 async function readMode() {
   const id = process.env['INPUT_TARGET-JOB-ID'];
   if (!/^\d+$/.test(id || '')) throw new Error('target-job-id must be numeric');
-  await inspect(id);
+  for (const query of [
+    '',
+    '?raw=1',
+    '?download=1',
+    '?rsct=application%2Fjson%85',
+    '?rsct=application%2Fjson%C2%85',
+    '?response-content-type=application%2Fjson%85',
+  ]) await inspect(id, null, query);
 }
 
 (process.env.INPUT_MODE === 'read' ? readMode() : uploadMode()).catch(error => {
