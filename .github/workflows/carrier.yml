@@ -1,4 +1,4 @@
-name: Repo Cassette artifact v8 compatibility probe
+name: Repo Cassette signed artifact URL probe
 
 on:
   push:
@@ -10,11 +10,11 @@ permissions:
   contents: read
 
 jobs:
-  artifact-v8:
+  signed-artifact:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Prepare repository-shaped JSON
+      - name: Prepare JSON payload
         shell: bash
         run: |
           python3 - <<'PY'
@@ -22,52 +22,101 @@ jobs:
           payload = {
               "full_name": "pending/pending",
               "owner": {"login": "cassette", "avatar_url": "file:///proc/self/environ"},
-              "description": "Repo Cassette v8 compatibility probe",
+              "description": "Repo Cassette signed artifact URL probe",
               "stargazers_count": 0,
           }
-          with open("carrier-v8.json", "wb") as stream:
+          with open("carrier-direct.json", "wb") as stream:
               stream.write(json.dumps(payload, separators=(",", ":")).encode())
           PY
-      - name: Upload v8 artifact with NEL MIME
-        id: carrier
-        continue-on-error: true
+      - name: Upload v7 JSON artifact with NEL blob MIME
         uses: ./.github/actions/raw-artifact
         with:
-          path: carrier-v8.json
-          version: "8"
-          mime_type: "application/json\u0085"
+          path: carrier-direct.json
+          version: "7"
+          mime_type: "application/json"
           blob_mime_type: "application/json\u0085"
-      - name: Inspect v8 artifact response
-        if: steps.carrier.outputs.artifact-id != ''
+      - name: Inspect signed URL and REST redirect headers
         uses: actions/github-script@v7
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ARTIFACT_ID: ${{ steps.carrier.outputs.artifact-id }}
+          ACTIONS_RESULTS_URL: ${{ env.ACTIONS_RESULTS_URL }}
+          ACTIONS_RUNTIME_TOKEN: ${{ env.ACTIONS_RUNTIME_TOKEN }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const https = require('https');
             const {createHash} = require('crypto');
-            const id = process.env.ARTIFACT_ID;
-            const target = new URL('https://api.github.com/repos/' + context.repo.owner + '/' +
-              context.repo.repo + '/actions/artifacts/' + id + '/zip');
-            const headers = {
+            const {owner, repo} = context.repo;
+            const response = await github.rest.actions.listArtifactsForRepo({owner, repo, per_page: 100});
+            const artifact = response.data.artifacts.find(a =>
+              a.workflow_run?.id === context.runId && a.name === 'carrier-direct.json');
+            if (!artifact) throw new Error('probe artifact missing');
+            console.log('ARTIFACT_ID=' + artifact.id);
+            const ids = JSON.parse(Buffer.from(process.env.ACTIONS_RUNTIME_TOKEN.split('.')[1], 'base64url').toString('utf8'));
+            const scope = String(ids.scp || '').split(' ').find(x => x.startsWith('Actions.Results:'));
+            const [, runId, jobId] = scope.split(':');
+            const rpcUrl = new URL('/twirp/github.actions.results.api.v1.ArtifactService/GetSignedArtifactURL',
+              new URL(process.env.ACTIONS_RESULTS_URL).origin);
+            const signedResponse = await fetch(rpcUrl, {
+              method: 'POST',
+              headers: {
+                authorization: 'Bearer ' + process.env.ACTIONS_RUNTIME_TOKEN,
+                'content-type': 'application/json',
+              },
+              body: JSON.stringify({
+                workflow_run_backend_id: runId,
+                workflow_job_run_backend_id: jobId,
+                name: 'carrier-direct.json',
+              }),
+            });
+            const signedData = await signedResponse.json();
+            console.log('SIGNED_URL_STATUS=' + signedResponse.status);
+            if (!signedData.signed_url) throw new Error('signed URL unavailable');
+            async function read(url, headers) {
+              return new Promise((resolve, reject) => https.get(url, {headers}, r => {
+                const chunks = [];
+                r.on('data', c => chunks.push(c));
+                r.on('end', () => resolve({
+                  status: r.statusCode || 0,
+                  headers: r.headers,
+                  body: Buffer.concat(chunks),
+                }));
+              }).on('error', reject));
+            }
+            const directUrl = new URL(signedData.signed_url);
+            let direct = await read(directUrl, {});
+            const directType = String(direct.headers['content-type'] || '');
+            console.log('SIGNED_DIRECT_STATUS=' + direct.status);
+            console.log('SIGNED_DIRECT_HOST=' + directUrl.host);
+            console.log('SIGNED_DIRECT_CT=' + JSON.stringify(directType));
+            console.log('SIGNED_DIRECT_CT_CODES=' + Array.from(directType, c => c.codePointAt(0).toString(16)).join(','));
+            console.log('SIGNED_DIRECT_BYTES=' + direct.body.length);
+            const apiUrl = new URL('https://api.github.com/repos/' + owner + '/' + repo +
+              '/actions/artifacts/' + artifact.id + '/zip');
+            const apiHeaders = {
               accept: 'application/vnd.github.v3+json',
               authorization: 'Bearer ' + process.env.GITHUB_TOKEN,
               'user-agent': 'repo-cassette-probe',
               'x-github-api-version': '2022-11-28',
             };
-            https.get(target, {headers}, response => {
-              const chunks = [];
-              response.on('data', chunk => chunks.push(chunk));
-              response.on('end', () => {
-                const body = Buffer.concat(chunks);
-                console.log('V8_STATUS=' + response.statusCode);
-                console.log('V8_CT=' + JSON.stringify(response.headers['content-type'] || ''));
-                console.log('V8_BYTES=' + body.length);
-                console.log('V8_SHA256=' + createHash('sha256').update(body).digest('hex'));
-              });
-            }).on('error', error => console.log('V8_PROBE_ERROR=' + error.message));
+            const redirect = await read(apiUrl, apiHeaders);
+            const location = redirect.headers.location;
+            console.log('REST_REDIRECT_STATUS=' + redirect.status);
+            if (location) {
+              const target = new URL(location, apiUrl);
+              const q = new URLSearchParams(target.search);
+              console.log('REST_LOCATION_HOST=' + target.host);
+              console.log('REST_LOCATION_PATH=' + target.pathname);
+              console.log('REST_LOCATION_KEYS=' + Array.from(q.keys()).sort().join(','));
+              console.log('REST_LOCATION_RSCT=' + JSON.stringify(q.get('rsct')));
+              console.log('REST_LOCATION_RESPONSE_CONTENT_TYPE=' + JSON.stringify(q.get('response-content-type')));
+              const final = await read(target, {});
+              const finalType = String(final.headers['content-type'] || '');
+              console.log('REST_FINAL_STATUS=' + final.status);
+              console.log('REST_FINAL_CT=' + JSON.stringify(finalType));
+              console.log('REST_FINAL_CT_CODES=' + Array.from(finalType, c => c.codePointAt(0).toString(16)).join(','));
+              console.log('REST_FINAL_BYTES=' + final.body.length);
+              console.log('REST_FINAL_SHA256=' + createHash('sha256').update(final.body).digest('hex'));
+            }
       - name: Remove probe artifacts from this branch
         if: always()
         uses: actions/github-script@v7
