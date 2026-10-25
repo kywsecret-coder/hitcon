@@ -1,4 +1,4 @@
-name: Repo Cassette inspect and clean artifacts
+name: Repo Cassette artifact v1 MIME probe
 
 on:
   push:
@@ -10,45 +10,62 @@ permissions:
   contents: read
 
 jobs:
-  inspect-clean:
+  artifact-v1:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect exact artifact response headers and clean probes
+      - name: Prepare repository-shaped JSON
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          payload = {
+              "full_name": "pending/pending",
+              "owner": {"login": "cassette", "avatar_url": "file:///proc/self/environ"},
+              "description": "Repo Cassette v1 MIME probe",
+              "stargazers_count": 0,
+          }
+          with open("carrier-v1.json", "wb") as stream:
+              stream.write(json.dumps(payload, separators=(",", ":")).encode())
+          PY
+      - name: Upload v1 artifact with NEL MIME
+        id: carrier
+        continue-on-error: true
+        uses: ./.github/actions/raw-artifact
+        with:
+          path: carrier-v1.json
+          version: "1"
+          mime_type: "application/json\u0085"
+          blob_mime_type: "application/json\u0085"
+      - name: Inspect artifact response
+        if: steps.carrier.outputs.artifact-id != ''
         uses: actions/github-script@v7
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARTIFACT_ID: ${{ steps.carrier.outputs.artifact-id }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const https = require('https');
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const artifactId = '12590687349';
-            const start = new URL('https://api.github.com/repos/' + owner + '/' + repo +
-              '/actions/artifacts/' + artifactId + '/zip');
-            function contentTypes(raw) {
-              const result = [];
-              for (let i = 0; i < raw.length; i += 2) {
-                if (String(raw[i]).toLowerCase() === 'content-type') result.push(raw[i + 1]);
-              }
-              return result;
-            }
-            function request(target, headers) {
+            const {createHash} = require('crypto');
+            const id = process.env.ARTIFACT_ID;
+            const target = new URL('https://api.github.com/repos/' + context.repo.owner + '/' +
+              context.repo.repo + '/actions/artifacts/' + id + '/zip');
+            function request(url, headers) {
               return new Promise((resolve, reject) => {
-                https.get(target, {headers}, response => {
+                https.get(url, {headers}, response => {
                   const chunks = [];
                   response.on('data', chunk => chunks.push(chunk));
                   response.on('end', () => resolve({
                     status: response.statusCode || 0,
                     headers: response.headers,
-                    rawHeaders: response.rawHeaders,
                     body: Buffer.concat(chunks),
                   }));
                 }).on('error', reject);
               });
             }
-            let current = start;
+            let response;
+            let current = target;
             for (let hop = 0; hop < 6; hop++) {
               const headers = {
                 accept: 'application/vnd.github.v3+json',
@@ -58,22 +75,31 @@ jobs:
               if (current.hostname === 'api.github.com') {
                 headers.authorization = 'Bearer ' + process.env.GITHUB_TOKEN;
               }
-              const response = await request(current, headers);
-              console.log('ARTIFACT_HOP status=' + response.status +
-                ' host=' + current.host +
-                ' content_types=' + JSON.stringify(contentTypes(response.rawHeaders)));
+              response = await request(current, headers);
               if (response.status >= 300 && response.status < 400 && response.headers.location) {
                 current = new URL(response.headers.location, current);
                 continue;
               }
               break;
             }
+            const type = response.headers['content-type'] || '';
+            console.log('V1_ID=' + id);
+            console.log('V1_STATUS=' + response.status + ' HOST=' + current.host);
+            console.log('V1_CONTENT_TYPE=' + JSON.stringify(type));
+            console.log('V1_CT_CODES=' + Array.from(type, ch => ch.codePointAt(0).toString(16)).join(','));
+            console.log('V1_BYTES=' + response.body.length);
+            console.log('V1_SHA256=' + createHash('sha256').update(response.body).digest('hex'));
+      - name: Remove v1 probe artifacts
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const {owner, repo} = context.repo;
             const result = await github.rest.actions.listArtifactsForRepo({owner, repo, per_page: 100});
-            const mine = result.data.artifacts.filter(artifact =>
-              artifact.workflow_run?.head_branch === 'codex/repo-cassette-release-routes');
-            let deleted = 0;
-            for (const artifact of mine) {
+            const probeArtifacts = result.data.artifacts.filter(a =>
+              a.workflow_run?.head_branch === 'codex/repo-cassette-release-routes');
+            for (const artifact of probeArtifacts) {
               await github.rest.actions.deleteArtifact({owner, repo, artifact_id: artifact.id});
-              deleted++;
             }
-            console.log('PROBE_ARTIFACTS_DELETED=' + deleted);
+            console.log('PROBE_ARTIFACTS_DELETED=' + probeArtifacts.length);
