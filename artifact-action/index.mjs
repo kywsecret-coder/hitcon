@@ -30,9 +30,9 @@ async function create(name, version, mime) {
   return result;
 }
 
-async function upload(url, bytes) {
+async function upload(url, bytes, mime = weird) {
   await new BlobClient(url).getBlockBlobClient().uploadData(bytes, {
-    blobHTTPHeaders: { blobContentType: weird },
+    blobHTTPHeaders: { blobContentType: mime },
   });
 }
 
@@ -50,14 +50,18 @@ async function finalize(name, bytes) {
 }
 
 async function race(index) {
-  const name = `cassette-raw-nel-${process.env.GITHUB_RUN_ID}-${index}-${Date.now()}`;
-  const artifact = await create(name, 7, weird);
+  const name = `cassette-sequential-${process.env.GITHUB_RUN_ID}-${index}-${Date.now()}`;
+  const legacy = await create(name, 6, weird);
+  const raw = await create(name, 7, 'application/json');
   const placeholder = Buffer.from('{"probe":"placeholder"}');
-  await upload(artifact.signedUploadUrl, placeholder);
+  await upload(legacy.signedUploadUrl, placeholder, weird);
+  await upload(raw.signedUploadUrl, placeholder, 'application/json');
   const artifactId = await finalize(name, placeholder);
   const body = payload(artifactId);
-  await upload(artifact.signedUploadUrl, body);
-  return { name, artifactId, repository: `${repositoryName}/actions/artifacts/${artifactId}/zip` };
+  const finalUpload = index % 2 === 0 ? legacy : raw;
+  const finalMime = index % 2 === 0 ? weird : 'application/json';
+  await upload(finalUpload.signedUploadUrl, body, finalMime);
+  return { name, artifactId, repository: `${repositoryName}/actions/artifacts/${artifactId}/zip`, finalUpload: index % 2 === 0 ? 'legacy' : 'raw' };
 }
 
 const results = [];
