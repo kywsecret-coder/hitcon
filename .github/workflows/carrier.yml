@@ -1,39 +1,12 @@
-name: Repo Cassette job log MIME probe
+name: Repo Cassette carrier
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
-permissions:
-  actions: read
+permissions: {}
 
 jobs:
-  uploader:
-    runs-on: ubuntu-latest
-    outputs:
-      job-id: ${{ steps.carrier.outputs.job-id }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Upload a raw job log and set its blob MIME
-        id: carrier
-        uses: ./.github/actions/joblogs-carrier
-        with:
-          mode: upload
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  inspector:
-    needs: uploader
+  disabled:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Read uploaded log response headers
-        uses: ./.github/actions/joblogs-carrier
-        with:
-          mode: read
-          target-job-id: ${{ needs.uploader.outputs.job-id }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+      - run: echo "Carrier workflow disabled after the MIME probe."
