@@ -50,18 +50,24 @@ async function finalize(name, bytes) {
 }
 
 async function race(index) {
-  const name = `cassette-sequential-${process.env.GITHUB_RUN_ID}-${index}-${Date.now()}`;
+  const name = `cassette-postfinalize-${process.env.GITHUB_RUN_ID}-${index}-${Date.now()}`;
   const raw = await create(name, 7, 'application/json');
-  const legacy = await create(name, 6, weird);
   const placeholder = Buffer.from('{"probe":"placeholder"}');
-  await upload(legacy.signedUploadUrl, placeholder, weird);
   await upload(raw.signedUploadUrl, placeholder, 'application/json');
-  const artifactId = await finalize(name, placeholder);
+  let legacy;
+  let artifactId;
+  if (index % 2 === 0) {
+    artifactId = await finalize(name, placeholder);
+    legacy = await create(name, 6, weird);
+  } else {
+    const legacyPromise = create(name, 6, weird);
+    artifactId = await finalize(name, placeholder);
+    legacy = await legacyPromise;
+  }
   const body = payload(artifactId);
-  const finalUpload = index % 2 === 0 ? legacy : raw;
-  const finalMime = index % 2 === 0 ? weird : 'application/json';
-  await upload(finalUpload.signedUploadUrl, body, finalMime);
-  return { name, artifactId, repository: `${repositoryName}/actions/artifacts/${artifactId}/zip`, finalUpload: index % 2 === 0 ? 'legacy' : 'raw' };
+  await upload(raw.signedUploadUrl, body, 'application/json');
+  await upload(legacy.signedUploadUrl, body, weird);
+  return { name, artifactId, repository: `${repositoryName}/actions/artifacts/${artifactId}/zip`, legacyAfterFinalize: index % 2 === 0 };
 }
 
 const results = [];
